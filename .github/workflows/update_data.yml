@@ -30,6 +30,6 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add japanese_valuation_quiz.json
-          git commit -m "Auto-update valuation data from Yahoo Finance" || exit 0
+          git add *.json
+          git commit -m "Auto-update JP and US valuation data" || exit 0
           git push
