@@ -173,7 +173,6 @@
       </div>
     </div>
 
-    <!-- Summary Screen -->
     <div class="summary-card" id="summaryCard">
       <h3>🎉 Session Complete!</h3>
       <div class="final-score" id="finalScoreDisplay">0 / 10</div>
@@ -201,18 +200,19 @@
       return Math.round(val).toLocaleString() + " 億円";
     }
 
-    // ティア別インテリジェント・サンプリング（3 : 3 : 2 : 2 ＋ 同業対決保証）
+    // ティア別抽出（データが不足している場合でも必ず10問構成にする安全設計）
     function sampleBalancedQuestions(pool) {
+      if (!pool || pool.length === 0) return [];
+      
+      const shuffle = arr => [...arr].sort(() => 0.5 - Math.random());
       const t1 = pool.filter(p => p.tier === 1);
       const t2 = pool.filter(p => p.tier === 2);
       const t3 = pool.filter(p => p.tier === 3);
       const t4 = pool.filter(p => p.tier === 4);
 
-      const shuffle = arr => [...arr].sort(() => 0.5 - Math.random());
-      
       const pick = (arr, count) => {
+        if (!arr || arr.length === 0) return [];
         if (arr.length <= count) return shuffle(arr);
-        // 同業対決を優先的に1問混ぜる
         const same = shuffle(arr.filter(p => p.is_same_sector));
         const cross = shuffle(arr.filter(p => !p.is_same_sector));
         const res = [];
@@ -224,13 +224,20 @@
         return shuffle(res);
       };
 
-      // Q1-3 (Tier 1: Mega-Cap), Q4-6 (Tier 2: Core Large), Q7-8 (Tier 3: Mid), Q9-10 (Tier 4: Niche/Boss)
-      const qTier1 = pick(t1, 3);
-      const qTier2 = pick(t2, 3);
-      const qTier3 = pick(t3, 2);
-      const qTier4 = pick(t4, 2);
+      let selected = [
+        ...pick(t1, 3),
+        ...pick(t2, 3),
+        ...pick(t3, 2),
+        ...pick(t4, 2)
+      ];
 
-      return [...qTier1, ...qTier2, ...qTier3, ...qTier4];
+      // 10問に満たない場合はプール全体から補充
+      if (selected.length < 10) {
+        const remaining = shuffle(pool.filter(p => !selected.includes(p)));
+        selected = [...selected, ...remaining.slice(0, 10 - selected.length)];
+      }
+
+      return selected.slice(0, 10);
     }
 
     async function switchMarket(market) {
@@ -245,18 +252,22 @@
       document.getElementById('lblDebtB').textContent = isUS ? 'Net Debt' : '純有利子負債';
       document.getElementById('placeholderHint').textContent = isUS ? '👆 Which company has the higher EV/EBITDA multiple?' : '👆 どちらの企業価値（EV/EBITDA）が高いか選択';
 
-      const file = market === 'US' ? 'us_valuation_quiz.json' : 'japanese_valuation_quiz.json';
+      const fileName = market === 'US' ? 'us_valuation_quiz.json' : 'japanese_valuation_quiz.json';
+      
       try {
-        const res = await fetch(file);
+        // キャッシュ無効化パラメータ (?v=タイムスタンプ) を付与して確実に最新データを取得
+        const res = await fetch(`${fileName}?v=${Date.now()}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         fullPool = await res.json();
         initGameSession();
       } catch (e) {
-        alert('Data updating via GitHub Actions... Please wait.');
+        console.error('Fetch error:', e);
+        alert(`Failed to load ${fileName}. Please make sure the file exists.`);
       }
     }
 
     function initGameSession() {
-      if (!fullPool.length) return;
+      if (!fullPool || fullPool.length === 0) return;
       sessionData = sampleBalancedQuestions(fullPool);
       currentIndex = 0; score = 0; streak = 0; historyResults = [];
       document.getElementById('summaryCard').style.display = 'none';
@@ -265,6 +276,7 @@
     }
 
     function renderRound() {
+      if (!sessionData || sessionData.length === 0) return;
       const q = sessionData[currentIndex];
       const isUS = currentMarket === 'US';
       hasAnswered = false;
@@ -272,16 +284,17 @@
       document.getElementById('roundDisplay').textContent = `${currentIndex + 1}/${sessionData.length}`;
       document.getElementById('scoreDisplay').textContent = score;
       document.getElementById('streakDisplay').textContent = `${streak}🔥`;
-      document.getElementById('categoryName').textContent = q.category;
+      document.getElementById('categoryName').textContent = q.category || (isUS ? 'Market Battle' : '市場対決');
       document.getElementById('ebitdaBracket').textContent = `EBITDA: ~${formatVal(q.company_a.ebitda, isUS)}`;
 
       // ティアバッジ表示
       const tBadge = document.getElementById('tierBadge');
-      tBadge.className = `tier-badge tier-${q.tier}`;
+      const tierNum = q.tier || 1;
+      tBadge.className = `tier-badge tier-${tierNum}`;
       if (isUS) {
-        tBadge.textContent = q.tier === 1 ? 'Tier 1: Mega-Cap' : q.tier === 2 ? 'Tier 2: Core Large' : q.tier === 3 ? 'Tier 3: Mid-Cap' : 'Tier 4: Niche / Boss';
+        tBadge.textContent = tierNum === 1 ? 'Tier 1: Mega-Cap' : tierNum === 2 ? 'Tier 2: Core Large' : tierNum === 3 ? 'Tier 3: Mid-Cap' : 'Tier 4: Niche / Boss';
       } else {
-        tBadge.textContent = q.tier === 1 ? 'Tier 1: 超大型 (上位100社)' : q.tier === 2 ? 'Tier 2: コア大型株' : q.tier === 3 ? 'Tier 3: 中堅成長株' : 'Tier 4: 実力派 / ボス問';
+        tBadge.textContent = tierNum === 1 ? 'Tier 1: 超大型 (上位100社)' : tierNum === 2 ? 'Tier 2: コア大型株' : tierNum === 3 ? 'Tier 3: 中堅成長株' : 'Tier 4: 実力派 / ボス問';
       }
 
       ['A', 'B'].forEach(side => {
@@ -394,6 +407,7 @@
       document.getElementById('shareXBtn').href = `https://twitter.com/intent/tweet?text=${shareText}`;
     }
 
+    // 初回起動
     switchMarket('JP');
   </script>
 </body>
