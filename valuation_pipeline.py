@@ -1,4 +1,5 @@
 import concurrent.futures
+import io
 import itertools
 import json
 import logging
@@ -7,6 +8,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Dict, List, Optional, Tuple
 from bs4 import BeautifulSoup
+import pandas as pd
 import requests
 import yfinance as yf
 
@@ -31,11 +33,11 @@ class CompanyProfile:
     name: str
     sector: str
     industry: str
-    market_cap: float
-    net_debt: float
-    ev: float
-    ebitda: float
-    ev_ebitda: float
+    market_cap: float      # 日本: 億円 / 米国: $B
+    net_debt: float        # 日本: 億円 / 米国: $B
+    ev: float              # 日本: 億円 / 米国: $B
+    ebitda: float          # 日本: 億円 / 米国: $B
+    ev_ebitda: float       # 倍
     description: str
     mcap_rank: int = 0
 
@@ -43,7 +45,7 @@ class CompanyProfile:
 class QuizPair:
     round_id: str
     category: str
-    tier: int              # 1: Top100, 2: 101-300, 3: 301-500, 4: 501-1000
+    tier: int
     is_same_sector: bool
     company_a: CompanyProfile
     company_b: CompanyProfile
@@ -51,17 +53,20 @@ class QuizPair:
     ebitda_diff_pct: float
     multiple_ratio: float
 
-class TieredValuationPipeline:
-    def __init__(self, max_workers: int = 12):
+class FullScaleValuationPipeline:
+    def __init__(self, max_workers: int = 16):
         self.max_workers = max_workers
 
-    # --- 🇯🇵 JP Market Pipeline ---
+    # ---------------------------------------------------------
+    # 🇯🇵 日本市場: 東証プライム時価総額 上位1,000社
+    # ---------------------------------------------------------
     def fetch_jp_ranking(self, target_count: int = 1000) -> List[Tuple[str, str]]:
         company_list = []
         seen = set()
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         pages = target_count // 50
 
+        logging.info(f"Yahoo!ファイナンスから日本株上位 {target_count} 社を取得中...")
         for page in range(1, pages + 1):
             url = f"https://finance.yahoo.co.jp/stocks/ranking/marketCapitalHigh?market=prime&page={page}"
             try:
@@ -77,7 +82,7 @@ class TieredValuationPipeline:
                             name = re.sub(r"^株式会社|株式会社$|\(株\)|（株）", "", raw_name).strip()
                             company_list.append((code, name))
                             seen.add(code)
-                time.sleep(0.1)
+                time.sleep(0.08)
             except Exception: pass
         return company_list[:target_count]
 
@@ -110,19 +115,42 @@ class TieredValuationPipeline:
             )
         except Exception: return None
 
-    # --- 🇺🇸 US Market Pipeline (S&P 500) ---
-    def fetch_us_ranking(self) -> List[Tuple[str, str]]:
-        url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        soup = BeautifulSoup(res.text, "html.parser")
-        table = soup.find("table", {"id": "constituents"})
+    # ---------------------------------------------------------
+    # 🇺🇸 米国市場: S&P 500 全構成銘柄 (約500社)
+    # ---------------------------------------------------------
+    def fetch_sp500_tickers(self) -> List[Tuple[str, str]]:
+        """Wikipedia + GitHub Raw の二重化で確実に全500社を取得"""
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         tickers = []
-        for row in table.find_all("tr")[1:]:
-            cols = row.find_all("td")
-            if len(cols) > 1:
-                ticker = cols[0].text.strip().replace(".", "-")
-                name = cols[1].text.strip()
-                tickers.append((ticker, name))
+
+        # 1. Wikipediaから取得を試行
+        try:
+            wiki_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+            res = requests.get(wiki_url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                table = soup.find("table", {"id": "constituents"})
+                if table:
+                    for row in table.find_all("tr")[1:]:
+                        cols = row.find_all("td")
+                        if len(cols) > 1:
+                            t = cols[0].text.strip().replace(".", "-")
+                            n = cols[1].text.strip()
+                            tickers.append((t, n))
+        except Exception as e:
+            logging.warning(f"Wikipedia fetch failed: {e}")
+
+        # 2. フォールバック: GitHub Datasetsオープンデータ
+        if len(tickers) < 400:
+            logging.info("フォールバックデータソースからS&P 500を取得中...")
+            try:
+                fb_url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+                df = pd.read_csv(fb_url)
+                tickers = [(row["Symbol"].replace(".", "-"), row["Security"]) for _, row in df.iterrows()]
+            except Exception as e:
+                logging.error(f"Fallback fetch failed: {e}")
+
+        logging.info(f"S&P 500 取得対象数: {len(tickers)} 社")
         return tickers
 
     def fetch_us_single(self, ticker: str, name: str) -> Optional[CompanyProfile]:
@@ -143,17 +171,22 @@ class TieredValuationPipeline:
 
             ev_ebitda = ev / ebitda
             if ev_ebitda < 0.5 or ev_ebitda > 90.0: return None
-            desc = (info.get("longBusinessSummary") or "")[:80] + "..."
+            
+            clean_name = name if name else (info.get("shortName") or ticker)
+            industry = info.get("industry", "S&P 500")
 
             return CompanyProfile(
-                ticker=ticker, name=name, sector=sector, industry=info.get("industry", "N/A"),
+                ticker=ticker, name=clean_name, sector=sector, industry=industry,
                 market_cap=round(mcap, 2), net_debt=round(net_debt, 2), ev=round(ev, 2),
-                ebitda=round(ebitda, 2), ev_ebitda=round(ev_ebitda, 2), description=desc
+                ebitda=round(ebitda, 2), ev_ebitda=round(ev_ebitda, 2),
+                description=f"S&P 500 / {sector} ({industry})"
             )
         except Exception: return None
 
-    # --- Tier Calculation & Pair Generation ---
-    def generate_tiered_pairs(self, companies: List[CompanyProfile], is_us: bool = False) -> List[QuizPair]:
+    # ---------------------------------------------------------
+    # ペア生成 & ティア判定ロジック
+    # ---------------------------------------------------------
+    def generate_pairs(self, companies: List[CompanyProfile], is_us: bool = False) -> List[QuizPair]:
         pairs = []
         pair_cnt = 1
         sorted_comps = sorted(companies, key=lambda x: x.ebitda)
@@ -164,17 +197,17 @@ class TieredValuationPipeline:
             for j in range(i + 1, n):
                 b = sorted_comps[j]
                 diff_pct = (b.ebitda - a.ebitda) / b.ebitda
-                if diff_pct > 0.15: break
+                if diff_pct > 0.15: break # EBITDA差 ±15%以内
+                
                 ratio = max(a.ev_ebitda, b.ev_ebitda) / min(a.ev_ebitda, b.ev_ebitda)
-                if ratio >= 1.4:
+                if ratio >= 1.4: # マルチプル差 1.4倍以上
                     top_rank = min(a.mcap_rank, b.mcap_rank)
                     
-                    # ティア判定 (日本: 1000社基準 / 米国: 500社基準)
                     if is_us:
-                        if top_rank <= 50: tier = 1
-                        elif top_rank <= 150: tier = 2
-                        elif top_rank <= 300: tier = 3
-                        else: tier = 4
+                        if top_rank <= 50: tier = 1       # Top 50 Mega-Cap
+                        elif top_rank <= 150: tier = 2    # 51-150 Core Large
+                        elif top_rank <= 300: tier = 3    # 151-300 Mid-Cap
+                        else: tier = 4                    # 301-500 Niche / Boss
                         cat = "Same Sector" if a.sector == b.sector else "Cross Sector"
                     else:
                         if top_rank <= 100: tier = 1
@@ -184,22 +217,17 @@ class TieredValuationPipeline:
                         cat = "同業対決" if a.sector == b.sector else "異業種対決"
 
                     pairs.append(QuizPair(
-                        round_id=f"ROUND_{pair_cnt:04d}",
-                        category=cat,
-                        tier=tier,
+                        round_id=f"ROUND_{pair_cnt:04d}", category=cat, tier=tier,
                         is_same_sector=(a.sector == b.sector),
-                        company_a=a,
-                        company_b=b,
-                        winner="A" if a.ev > b.ev else "B",
-                        ebitda_diff_pct=round(diff_pct * 100, 1),
-                        multiple_ratio=round(ratio, 2)
+                        company_a=a, company_b=b, winner="A" if a.ev > b.ev else "B",
+                        ebitda_diff_pct=round(diff_pct * 100, 1), multiple_ratio=round(ratio, 2)
                     ))
                     pair_cnt += 1
         return pairs
 
     def run(self):
-        # 1. 日本市場
-        logging.info("=== 日本市場データの処理開始 ===")
+        # 1. 日本株 1,000社
+        logging.info("=== 日本市場パイプライン実行 ===")
         jp_ranking = self.fetch_jp_ranking(1000)
         jp_valid = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as ex:
@@ -208,14 +236,14 @@ class TieredValuationPipeline:
                 r = f.result()
                 if r: jp_valid.append(r)
         
-        jp_pairs = self.generate_tiered_pairs(jp_valid, is_us=False)
+        jp_pairs = self.generate_pairs(jp_valid, is_us=False)
         with open("japanese_valuation_quiz.json", "w", encoding="utf-8") as f:
             json.dump([asdict(p) for p in jp_pairs], f, ensure_ascii=False, indent=2)
-        logging.info(f"日本版: {len(jp_pairs)} 問生成完了")
+        logging.info(f"日本版データセット生成完了: {len(jp_pairs)} 問")
 
-        # 2. 米国市場
-        logging.info("=== 米国市場データの処理開始 ===")
-        us_tickers = self.fetch_us_ranking()
+        # 2. 米国株 S&P 500全社
+        logging.info("=== 米国S&P 500パイプライン実行 ===")
+        us_tickers = self.fetch_sp500_tickers()
         us_valid = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as ex:
             fmap = {ex.submit(self.fetch_us_single, t, n): (t, n) for t, n in us_tickers}
@@ -223,15 +251,16 @@ class TieredValuationPipeline:
                 r = f.result()
                 if r: us_valid.append(r)
 
-        # 米国版は時価総額順にソートして順位を割り振る
+        # 時価総額順にランク付け
         us_valid.sort(key=lambda x: x.market_cap, reverse=True)
         for idx, comp in enumerate(us_valid):
             comp.mcap_rank = idx + 1
+            comp.description = f"S&P 500 Rank #{comp.mcap_rank} / {comp.sector}"
 
-        us_pairs = self.generate_tiered_pairs(us_valid, is_us=True)
+        us_pairs = self.generate_pairs(us_valid, is_us=True)
         with open("us_valuation_quiz.json", "w", encoding="utf-8") as f:
             json.dump([asdict(p) for p in us_pairs], f, ensure_ascii=False, indent=2)
-        logging.info(f"米国版: {len(us_pairs)} 問生成完了")
+        logging.info(f"米国版データセット生成完了: {len(us_pairs)} 問")
 
 if __name__ == "__main__":
-    TieredValuationPipeline().run()
+    FullScaleValuationPipeline(max_workers=16).run()
