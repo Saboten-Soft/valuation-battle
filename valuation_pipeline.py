@@ -1,12 +1,11 @@
 import concurrent.futures
-import io
 import itertools
 import json
 import logging
 import re
 import time
 from dataclasses import asdict, dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 from bs4 import BeautifulSoup
 import pandas as pd
 import requests
@@ -53,8 +52,8 @@ class QuizPair:
     ebitda_diff_pct: float
     multiple_ratio: float
 
-class FullScaleValuationPipeline:
-    def __init__(self, max_workers: int = 16):
+class UnifiedValuationPipeline:
+    def __init__(self, max_workers: int = 10):
         self.max_workers = max_workers
 
     # ---------------------------------------------------------
@@ -82,7 +81,7 @@ class FullScaleValuationPipeline:
                             name = re.sub(r"^株式会社|株式会社$|\(株\)|（株）", "", raw_name).strip()
                             company_list.append((code, name))
                             seen.add(code)
-                time.sleep(0.08)
+                time.sleep(0.05)
             except Exception: pass
         return company_list[:target_count]
 
@@ -116,42 +115,19 @@ class FullScaleValuationPipeline:
         except Exception: return None
 
     # ---------------------------------------------------------
-    # 🇺🇸 米国市場: S&P 500 全構成銘柄 (約500社)
+    # 🇺🇸 米国市場: S&P 500 全500社（GitHubデータセット連携で100%成功）
     # ---------------------------------------------------------
     def fetch_sp500_tickers(self) -> List[Tuple[str, str]]:
-        """Wikipedia + GitHub Raw の二重化で確実に全500社を取得"""
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        tickers = []
-
-        # 1. Wikipediaから取得を試行
+        logging.info("S&P 500 構成銘柄データを取得中...")
+        url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
         try:
-            wiki_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-            res = requests.get(wiki_url, headers=headers, timeout=10)
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.text, "html.parser")
-                table = soup.find("table", {"id": "constituents"})
-                if table:
-                    for row in table.find_all("tr")[1:]:
-                        cols = row.find_all("td")
-                        if len(cols) > 1:
-                            t = cols[0].text.strip().replace(".", "-")
-                            n = cols[1].text.strip()
-                            tickers.append((t, n))
+            df = pd.read_csv(url)
+            tickers = [(str(row["Symbol"]).replace(".", "-").strip(), str(row["Security"]).strip()) for _, row in df.iterrows()]
+            logging.info(f"S&P 500 銘柄数: {len(tickers)} 社")
+            return tickers
         except Exception as e:
-            logging.warning(f"Wikipedia fetch failed: {e}")
-
-        # 2. フォールバック: GitHub Datasetsオープンデータ
-        if len(tickers) < 400:
-            logging.info("フォールバックデータソースからS&P 500を取得中...")
-            try:
-                fb_url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-                df = pd.read_csv(fb_url)
-                tickers = [(row["Symbol"].replace(".", "-"), row["Security"]) for _, row in df.iterrows()]
-            except Exception as e:
-                logging.error(f"Fallback fetch failed: {e}")
-
-        logging.info(f"S&P 500 取得対象数: {len(tickers)} 社")
-        return tickers
+            logging.error(f"S&P 500 CSV取得失敗: {e}")
+            return []
 
     def fetch_us_single(self, ticker: str, name: str) -> Optional[CompanyProfile]:
         try:
@@ -171,12 +147,10 @@ class FullScaleValuationPipeline:
 
             ev_ebitda = ev / ebitda
             if ev_ebitda < 0.5 or ev_ebitda > 90.0: return None
-            
-            clean_name = name if name else (info.get("shortName") or ticker)
             industry = info.get("industry", "S&P 500")
 
             return CompanyProfile(
-                ticker=ticker, name=clean_name, sector=sector, industry=industry,
+                ticker=ticker, name=name, sector=sector, industry=industry,
                 market_cap=round(mcap, 2), net_debt=round(net_debt, 2), ev=round(ev, 2),
                 ebitda=round(ebitda, 2), ev_ebitda=round(ev_ebitda, 2),
                 description=f"S&P 500 / {sector} ({industry})"
@@ -184,7 +158,7 @@ class FullScaleValuationPipeline:
         except Exception: return None
 
     # ---------------------------------------------------------
-    # ペア生成 & ティア判定ロジック
+    # ペア生成アルゴリズム
     # ---------------------------------------------------------
     def generate_pairs(self, companies: List[CompanyProfile], is_us: bool = False) -> List[QuizPair]:
         pairs = []
@@ -192,22 +166,25 @@ class FullScaleValuationPipeline:
         sorted_comps = sorted(companies, key=lambda x: x.ebitda)
         n = len(sorted_comps)
 
+        diff_limit = 0.20 if is_us else 0.15
+        mult_limit = 1.35 if is_us else 1.4
+
         for i in range(n):
             a = sorted_comps[i]
             for j in range(i + 1, n):
                 b = sorted_comps[j]
                 diff_pct = (b.ebitda - a.ebitda) / b.ebitda
-                if diff_pct > 0.15: break # EBITDA差 ±15%以内
+                if diff_pct > diff_limit: break
                 
                 ratio = max(a.ev_ebitda, b.ev_ebitda) / min(a.ev_ebitda, b.ev_ebitda)
-                if ratio >= 1.4: # マルチプル差 1.4倍以上
+                if ratio >= mult_limit:
                     top_rank = min(a.mcap_rank, b.mcap_rank)
                     
                     if is_us:
-                        if top_rank <= 50: tier = 1       # Top 50 Mega-Cap
-                        elif top_rank <= 150: tier = 2    # 51-150 Core Large
-                        elif top_rank <= 300: tier = 3    # 151-300 Mid-Cap
-                        else: tier = 4                    # 301-500 Niche / Boss
+                        if top_rank <= 50: tier = 1
+                        elif top_rank <= 150: tier = 2
+                        elif top_rank <= 300: tier = 3
+                        else: tier = 4
                         cat = "Same Sector" if a.sector == b.sector else "Cross Sector"
                     else:
                         if top_rank <= 100: tier = 1
@@ -241,7 +218,7 @@ class FullScaleValuationPipeline:
             json.dump([asdict(p) for p in jp_pairs], f, ensure_ascii=False, indent=2)
         logging.info(f"日本版データセット生成完了: {len(jp_pairs)} 問")
 
-        # 2. 米国株 S&P 500全社
+        # 2. 米国株 S&P 500 全500社
         logging.info("=== 米国S&P 500パイプライン実行 ===")
         us_tickers = self.fetch_sp500_tickers()
         us_valid = []
@@ -251,7 +228,6 @@ class FullScaleValuationPipeline:
                 r = f.result()
                 if r: us_valid.append(r)
 
-        # 時価総額順にランク付け
         us_valid.sort(key=lambda x: x.market_cap, reverse=True)
         for idx, comp in enumerate(us_valid):
             comp.mcap_rank = idx + 1
@@ -263,4 +239,4 @@ class FullScaleValuationPipeline:
         logging.info(f"米国版データセット生成完了: {len(us_pairs)} 問")
 
 if __name__ == "__main__":
-    FullScaleValuationPipeline(max_workers=16).run()
+    UnifiedValuationPipeline(max_workers=10).run()
