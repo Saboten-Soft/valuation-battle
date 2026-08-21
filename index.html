@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Valuation Battle - EV/EBITDA Quiz</title>
+  <title>Valuation Battle JP - 企業価値クイズ</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800;900&family=Noto+Sans+JP:wght@600;800;900&display=swap" rel="stylesheet">
@@ -32,18 +32,16 @@
     header { display: flex; align-items: center; justify-content: space-between; background: var(--bg-card); border: 1px solid var(--border-color); padding: 5px 10px; border-radius: 10px; flex-shrink: 0; }
     .brand-title { font-size: 0.9rem; font-weight: 900; background: linear-gradient(135deg, #ffffff 40%, #93c5fd 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .market-switch { display: flex; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 2px; border: 1px solid rgba(255,255,255,0.1); }
-    .switch-btn { padding: 3px 8px; font-size: 0.7rem; font-weight: 800; border: none; background: transparent; color: var(--text-muted); cursor: pointer; border-radius: 4px; }
+    .switch-btn { padding: 3px 8px; font-size: 0.7rem; font-weight: 800; border: none; background: transparent; color: var(--text-muted); text-decoration: none; border-radius: 4px; }
     .switch-btn.active { background: var(--primary); color: #fff; }
     .stat-box { display: flex; gap: 8px; font-size: 0.75rem; color: var(--text-muted); font-weight: 700; }
     .stat-box strong { color: #fff; font-size: 0.85rem; font-family: 'Plus Jakarta Sans', sans-serif; }
-    
     .question-ribbon { display: flex; justify-content: space-between; align-items: center; background: linear-gradient(90deg, rgba(30, 58, 138, 0.4), rgba(88, 28, 135, 0.4)); border: 1px solid rgba(96, 165, 250, 0.25); padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 700; flex-shrink: 0; }
     .tier-badge { font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; font-weight: 800; }
     .tier-1 { background: rgba(59, 130, 246, 0.3); color: #93c5fd; border: 1px solid #3b82f6; }
     .tier-2 { background: rgba(16, 185, 129, 0.3); color: #6ee7b7; border: 1px solid #10b981; }
     .tier-3 { background: rgba(245, 158, 11, 0.3); color: #fcd34d; border: 1px solid #f59e0b; }
     .tier-4 { background: rgba(239, 68, 68, 0.3); color: #fca5a5; border: 1px solid #ef4444; }
-
     .bracket-pill { background: var(--accent-gold); color: #0f172a; padding: 1px 6px; border-radius: 4px; font-weight: 900; font-family: 'Plus Jakarta Sans', sans-serif; }
     .battle-container { display: grid; grid-template-columns: 1fr 20px 1fr; gap: 6px; align-items: stretch; flex: 1; min-height: 0; }
     .vs-sign { display: flex; justify-content: center; align-items: center; font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 900; font-size: 0.95rem; color: rgba(255, 255, 255, 0.2); }
@@ -86,47 +84,43 @@
 <body>
   <div class="app-wrapper">
     <header>
-      <span class="brand-title">Valuation Battle</span>
+      <span class="brand-title">Valuation Battle JP</span>
       <div class="market-switch">
-        <button class="switch-btn active" id="btnModeJP" onclick="switchMarket('JP')">🇯🇵 JP</button>
-        <button class="switch-btn" id="btnModeUS" onclick="switchMarket('US')">🇺🇸 US</button>
+        <span class="switch-btn active">🇯🇵 JP</span>
+        <a href="us.html" class="switch-btn">🇺🇸 US</a>
       </div>
       <div class="stat-box">
-        <span>Q: <strong id="roundDisplay">1/10</strong></span>
-        <span>W: <strong id="scoreDisplay">0</strong></span>
-        <span>Streak: <strong id="streakDisplay">0🔥</strong></span>
+        <span>問: <strong id="roundDisplay">1/10</strong></span>
+        <span>勝: <strong id="scoreDisplay">0</strong></span>
+        <span>連勝: <strong id="streakDisplay">0🔥</strong></span>
       </div>
     </header>
 
     <div id="gamePlayArea" style="display: flex; flex-direction: column; flex: 1; gap: 4px; min-height: 0;">
       <div class="question-ribbon">
         <div style="display: flex; gap: 6px; align-items: center;">
-          <span id="tierBadge" class="tier-badge tier-1">Tier 1: Mega-Cap</span>
+          <span id="tierBadge" class="tier-badge tier-1">Tier 1: 超大型</span>
           <span id="categoryName" style="color: #cbd5e1;">同業対決</span>
         </div>
         <span class="bracket-pill" id="ebitdaBracket">EBITDA: ~</span>
       </div>
 
       <div class="battle-container">
-        <!-- Card A -->
         <div class="card" id="cardA" onclick="handleChoice('A')">
           <div class="winner-stamp" id="stampA">HIGHER EV 👑</div>
           <div>
             <span class="ticker-code" id="tickerA">----</span>
-            <h2 class="company-title" id="nameA">Loading...</h2>
+            <h2 class="company-title" id="nameA">読み込み中...</h2>
             <span class="industry-badge" id="sectorA">-</span>
             <p class="company-summary" id="descA">-</p>
           </div>
           <div>
-            <div class="ebitda-chip">
-              <span class="chip-label">EBITDA</span>
-              <span class="chip-val" id="ebitdaValA">-</span>
-            </div>
+            <div class="ebitda-chip"><span class="chip-label">EBITDA</span><span class="chip-val" id="ebitdaValA">-</span></div>
             <div class="valuation-box" id="revealA">
               <table class="metrics-table">
-                <tr><td style="color: var(--text-muted);" id="lblMcapA">時価総額</td><td id="mcapA">-</td></tr>
-                <tr><td style="color: var(--text-muted);" id="lblDebtA">純負債</td><td id="debtA">-</td></tr>
-                <tr><td style="color: #93c5fd;">EV</td><td class="highlight-ev" id="evA">-</td></tr>
+                <tr><td style="color: var(--text-muted);">時価総額</td><td id="mcapA">-</td></tr>
+                <tr><td style="color: var(--text-muted);">純有利子負債</td><td id="debtA">-</td></tr>
+                <tr><td style="color: #93c5fd;">企業価値(EV)</td><td class="highlight-ev" id="evA">-</td></tr>
                 <tr><td style="color: #6ee7b7;">EV/EBITDA</td><td class="highlight-mult" id="multA">-</td></tr>
               </table>
             </div>
@@ -135,25 +129,21 @@
 
         <div class="vs-sign">VS</div>
 
-        <!-- Card B -->
         <div class="card" id="cardB" onclick="handleChoice('B')">
           <div class="winner-stamp" id="stampB">HIGHER EV 👑</div>
           <div>
             <span class="ticker-code" id="tickerB">----</span>
-            <h2 class="company-title" id="nameB">Loading...</h2>
+            <h2 class="company-title" id="nameB">読み込み中...</h2>
             <span class="industry-badge" id="sectorB">-</span>
             <p class="company-summary" id="descB">-</p>
           </div>
           <div>
-            <div class="ebitda-chip">
-              <span class="chip-label">EBITDA</span>
-              <span class="chip-val" id="ebitdaValB">-</span>
-            </div>
+            <div class="ebitda-chip"><span class="chip-label">EBITDA</span><span class="chip-val" id="ebitdaValB">-</span></div>
             <div class="valuation-box" id="revealB">
               <table class="metrics-table">
-                <tr><td style="color: var(--text-muted);" id="lblMcapB">時価総額</td><td id="mcapB">-</td></tr>
-                <tr><td style="color: var(--text-muted);" id="lblDebtB">純負債</td><td id="debtB">-</td></tr>
-                <tr><td style="color: #93c5fd;">EV</td><td class="highlight-ev" id="evB">-</td></tr>
+                <tr><td style="color: var(--text-muted);">時価総額</td><td id="mcapB">-</td></tr>
+                <tr><td style="color: var(--text-muted);">純有利子負債</td><td id="debtB">-</td></tr>
+                <tr><td style="color: #93c5fd;">企業価値(EV)</td><td class="highlight-ev" id="evB">-</td></tr>
                 <tr><td style="color: #6ee7b7;">EV/EBITDA</td><td class="highlight-mult" id="multB">-</td></tr>
               </table>
             </div>
@@ -162,53 +152,46 @@
       </div>
 
       <div class="bottom-panel">
-        <div class="placeholder-hint" id="placeholderHint">👆 Higher EV/EBITDA multiple?</div>
+        <div class="placeholder-hint" id="placeholderHint">👆 どちらの企業価値（EV/EBITDA）が高いか選択</div>
         <div class="result-card" id="resultCard">
           <div class="result-info">
-            <div class="result-header" id="resultStatus">🎉 Correct!</div>
+            <div class="result-header" id="resultStatus">🎉 正解！</div>
             <div class="result-desc" id="explanationText"></div>
           </div>
-          <button class="btn-next" onclick="nextRound()">Next ➔</button>
+          <button class="btn-next" onclick="nextRound()">次へ ➔</button>
         </div>
       </div>
     </div>
 
     <div class="summary-card" id="summaryCard">
-      <h3>🎉 Session Complete!</h3>
+      <h3>🎉 ゲーム終了！</h3>
       <div class="final-score" id="finalScoreDisplay">0 / 10</div>
-      <div class="rank-badge" id="rankBadge">Title: Analyst</div>
+      <div class="rank-badge" id="rankBadge">称号: アナリスト</div>
       <div id="emojiGrid" style="font-size: 1.2rem; letter-spacing: 2px; margin: 4px 0;"></div>
       <div style="display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;">
-        <a id="shareXBtn" class="btn-share-x" target="_blank">𝕏 Share Result</a>
-        <button class="btn-restart" onclick="initGameSession()">Play Again 🔄</button>
+        <a id="shareXBtn" class="btn-share-x" target="_blank">𝕏 で結果をシェア</a>
+        <button class="btn-restart" onclick="initGameSession()">もう一度 🔄</button>
       </div>
     </div>
 
     <div class="ad-banner-slot" id="adSlot">
-      <span style="font-size: 0.65rem; color: #475569;">[Ad Slot: Financial Careers / Wealth Management]</span>
+      <span style="font-size: 0.65rem; color: #475569;">[広告枠: ハイクラス転職 / 金融求人バナー]</span>
     </div>
   </div>
 
   <script>
-    let currentMarket = 'JP';
     let fullPool = [], sessionData = [], currentIndex = 0, score = 0, streak = 0, hasAnswered = false, historyResults = [];
 
-    function formatVal(val, isUS) {
+    function formatVal(val) {
       if (!val && val !== 0) return "-";
-      if (isUS) return `$${val.toFixed(1)}B`;
       if (Math.abs(val) >= 10000) return (val / 10000).toFixed(1) + " 兆円";
       return Math.round(val).toLocaleString() + " 億円";
     }
 
-    // ティア別抽出（データが不足している場合でも必ず10問構成にする安全設計）
     function sampleBalancedQuestions(pool) {
-      if (!pool || pool.length === 0) return [];
-      
       const shuffle = arr => [...arr].sort(() => 0.5 - Math.random());
-      const t1 = pool.filter(p => p.tier === 1);
-      const t2 = pool.filter(p => p.tier === 2);
-      const t3 = pool.filter(p => p.tier === 3);
-      const t4 = pool.filter(p => p.tier === 4);
+      const t1 = pool.filter(p => p.tier === 1), t2 = pool.filter(p => p.tier === 2);
+      const t3 = pool.filter(p => p.tier === 3), t4 = pool.filter(p => p.tier === 4);
 
       const pick = (arr, count) => {
         if (!arr || arr.length === 0) return [];
@@ -224,45 +207,21 @@
         return shuffle(res);
       };
 
-      let selected = [
-        ...pick(t1, 3),
-        ...pick(t2, 3),
-        ...pick(t3, 2),
-        ...pick(t4, 2)
-      ];
-
-      // 10問に満たない場合はプール全体から補充
+      let selected = [...pick(t1, 3), ...pick(t2, 3), ...pick(t3, 2), ...pick(t4, 2)];
       if (selected.length < 10) {
         const remaining = shuffle(pool.filter(p => !selected.includes(p)));
         selected = [...selected, ...remaining.slice(0, 10 - selected.length)];
       }
-
       return selected.slice(0, 10);
     }
 
-    async function switchMarket(market) {
-      currentMarket = market;
-      document.getElementById('btnModeJP').className = market === 'JP' ? 'switch-btn active' : 'switch-btn';
-      document.getElementById('btnModeUS').className = market === 'US' ? 'switch-btn active' : 'switch-btn';
-      
-      const isUS = market === 'US';
-      document.getElementById('lblMcapA').textContent = isUS ? 'Market Cap' : '時価総額';
-      document.getElementById('lblMcapB').textContent = isUS ? 'Market Cap' : '時価総額';
-      document.getElementById('lblDebtA').textContent = isUS ? 'Net Debt' : '純有利子負債';
-      document.getElementById('lblDebtB').textContent = isUS ? 'Net Debt' : '純有利子負債';
-      document.getElementById('placeholderHint').textContent = isUS ? '👆 Which company has the higher EV/EBITDA multiple?' : '👆 どちらの企業価値（EV/EBITDA）が高いか選択';
-
-      const fileName = market === 'US' ? 'us_valuation_quiz.json' : 'japanese_valuation_quiz.json';
-      
+    async function loadData() {
       try {
-        // キャッシュ無効化パラメータ (?v=タイムスタンプ) を付与して確実に最新データを取得
-        const res = await fetch(`${fileName}?v=${Date.now()}`);
-        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const res = await fetch(`japanese_valuation_quiz.json?v=${Date.now()}`);
         fullPool = await res.json();
         initGameSession();
       } catch (e) {
-        console.error('Fetch error:', e);
-        alert(`Failed to load ${fileName}. Please make sure the file exists.`);
+        alert("データの読み込みに失敗しました。");
       }
     }
 
@@ -276,26 +235,18 @@
     }
 
     function renderRound() {
-      if (!sessionData || sessionData.length === 0) return;
       const q = sessionData[currentIndex];
-      const isUS = currentMarket === 'US';
       hasAnswered = false;
-
       document.getElementById('roundDisplay').textContent = `${currentIndex + 1}/${sessionData.length}`;
       document.getElementById('scoreDisplay').textContent = score;
       document.getElementById('streakDisplay').textContent = `${streak}🔥`;
-      document.getElementById('categoryName').textContent = q.category || (isUS ? 'Market Battle' : '市場対決');
-      document.getElementById('ebitdaBracket').textContent = `EBITDA: ~${formatVal(q.company_a.ebitda, isUS)}`;
+      document.getElementById('categoryName').textContent = q.category || '市場対決';
+      document.getElementById('ebitdaBracket').textContent = `EBITDA: ~${formatVal(q.company_a.ebitda)}`;
 
-      // ティアバッジ表示
       const tBadge = document.getElementById('tierBadge');
       const tierNum = q.tier || 1;
       tBadge.className = `tier-badge tier-${tierNum}`;
-      if (isUS) {
-        tBadge.textContent = tierNum === 1 ? 'Tier 1: Mega-Cap' : tierNum === 2 ? 'Tier 2: Core Large' : tierNum === 3 ? 'Tier 3: Mid-Cap' : 'Tier 4: Niche / Boss';
-      } else {
-        tBadge.textContent = tierNum === 1 ? 'Tier 1: 超大型 (上位100社)' : tierNum === 2 ? 'Tier 2: コア大型株' : tierNum === 3 ? 'Tier 3: 中堅成長株' : 'Tier 4: 実力派 / ボス問';
-      }
+      tBadge.textContent = tierNum === 1 ? 'Tier 1: 超大型 (上位100社)' : tierNum === 2 ? 'Tier 2: コア大型株' : tierNum === 3 ? 'Tier 3: 中堅成長株' : 'Tier 4: 実力派 / ボス問';
 
       ['A', 'B'].forEach(side => {
         const comp = side === 'A' ? q.company_a : q.company_b;
@@ -303,14 +254,14 @@
         card.className = "card";
         document.getElementById('stamp' + side).style.display = 'none';
         document.getElementById('reveal' + side).style.display = 'none';
-        document.getElementById('ticker' + side).textContent = isUS ? comp.ticker : `TYO: ${comp.ticker}`;
+        document.getElementById('ticker' + side).textContent = `TYO: ${comp.ticker}`;
         document.getElementById('name' + side).textContent = comp.name;
         document.getElementById('sector' + side).textContent = comp.sector || comp.industry;
         document.getElementById('desc' + side).textContent = comp.description;
-        document.getElementById('ebitdaVal' + side).textContent = formatVal(comp.ebitda, isUS);
-        document.getElementById('mcap' + side).textContent = formatVal(comp.market_cap, isUS);
-        document.getElementById('debt' + side).textContent = (comp.net_debt < 0 ? "-" : "+") + formatVal(Math.abs(comp.net_debt), isUS);
-        document.getElementById('ev' + side).textContent = formatVal(comp.ev, isUS);
+        document.getElementById('ebitdaVal' + side).textContent = formatVal(comp.ebitda);
+        document.getElementById('mcap' + side).textContent = formatVal(comp.market_cap);
+        document.getElementById('debt' + side).textContent = (comp.net_debt < 0 ? "-" : "+") + formatVal(Math.abs(comp.net_debt));
+        document.getElementById('ev' + side).textContent = formatVal(comp.ev);
         document.getElementById('mult' + side).textContent = (comp.ev_ebitda).toFixed(1) + " x";
       });
 
@@ -322,7 +273,6 @@
       if (hasAnswered) return;
       hasAnswered = true;
       const q = sessionData[currentIndex];
-      const isUS = currentMarket === 'US';
       const trueWinner = q.company_a.ev >= q.company_b.ev ? "A" : "B";
       const isCorrect = selected === trueWinner;
       historyResults.push(isCorrect ? "🟩" : "🟥");
@@ -345,12 +295,10 @@
       const resStatus = document.getElementById('resultStatus');
       if (isCorrect) {
         score++; streak++;
-        resStatus.className = 'result-header correct';
-        resStatus.textContent = isUS ? '🎉 Correct!' : '🎉 正解！';
+        resStatus.className = 'result-header correct'; resStatus.textContent = '🎉 正解！';
       } else {
         streak = 0;
-        resStatus.className = 'result-header wrong';
-        resStatus.textContent = isUS ? '😢 Incorrect!' : '😢 不正解！';
+        resStatus.className = 'result-header wrong'; resStatus.textContent = '😢 不正解！';
         document.getElementById('card' + selected).classList.add('user-selected-wrong');
       }
 
@@ -358,57 +306,34 @@
       document.getElementById('streakDisplay').textContent = `${streak}🔥`;
       const winComp = trueWinner === 'A' ? q.company_a : q.company_b;
       const loseComp = trueWinner === 'A' ? q.company_b : q.company_a;
-      
-      if (isUS) {
-        document.getElementById('explanationText').innerHTML = `<strong>${winComp.name}</strong> (${winComp.ev_ebitda.toFixed(1)}x) trades at a higher multiple than ${loseComp.name} (${loseComp.ev_ebitda.toFixed(1)}x).`;
-      } else {
-        document.getElementById('explanationText').innerHTML = `<strong>${winComp.name}</strong> (${winComp.ev_ebitda.toFixed(1)}x) のEVが ${loseComp.name} (${loseComp.ev_ebitda.toFixed(1)}x) を上回っています。`;
-      }
-
+      document.getElementById('explanationText').innerHTML = `<strong>${winComp.name}</strong> (${winComp.ev_ebitda.toFixed(1)}x) のEVが ${loseComp.name} (${loseComp.ev_ebitda.toFixed(1)}x) を上回っています。`;
       document.getElementById('placeholderHint').style.display = 'none';
       document.getElementById('resultCard').style.display = 'flex';
     }
 
     function nextRound() {
-      if (currentIndex < sessionData.length - 1) {
-        currentIndex++; renderRound();
-      } else {
-        showSummary();
-      }
+      if (currentIndex < sessionData.length - 1) { currentIndex++; renderRound(); }
+      else { showSummary(); }
     }
 
     function showSummary() {
-      const isUS = currentMarket === 'US';
       document.getElementById('gamePlayArea').style.display = 'none';
       document.getElementById('summaryCard').style.display = 'block';
       document.getElementById('finalScoreDisplay').textContent = `${score} / ${sessionData.length}`;
-      
-      let rank = "";
-      if (isUS) {
-        if (score === 10) rank = "Legendary Portfolio Manager 👑";
-        else if (score >= 8) rank = "Private Equity Partner 🎖️";
-        else if (score >= 6) rank = "Senior Associate 💼";
-        else if (score >= 4) rank = "Junior Analyst 📊";
-        else rank = "Summer Intern ☕";
-      } else {
-        if (score === 10) rank = "伝説のポートフォリオマネージャー 👑";
-        else if (score >= 8) rank = "PEファンド VP級 🎖️";
-        else if (score >= 6) rank = "シニア・アソシエイト 💼";
-        else if (score >= 4) rank = "ジュニア・アナリスト 📊";
-        else rank = "研修生 (ビギナー) ☕";
-      }
-      
-      document.getElementById('rankBadge').textContent = (isUS ? 'Rank: ' : '称号: ') + rank;
+      let rank = "研修生 (ビギナー) ☕";
+      if (score === 10) rank = "伝説のポートフォリオマネージャー 👑";
+      else if (score >= 8) rank = "PEファンド VP級 🎖️";
+      else if (score >= 6) rank = "シニア・アソシエイト 💼";
+      else if (score >= 4) rank = "ジュニア・アナリスト 📊";
+      document.getElementById('rankBadge').textContent = `称号: ${rank}`;
       const emojiStr = historyResults.join('');
       document.getElementById('emojiGrid').textContent = emojiStr;
 
-      const titleTag = isUS ? 'Valuation Battle US (S&P 500)' : 'バリュエーション・バトル JP';
-      const shareText = encodeURIComponent(`【${titleTag}】\nScore: ${score}/10\nRank: ${rank}\n\n${emojiStr}\n\nCan you spot the higher valuation multiple?👇\n${window.location.href}\n#ValuationBattle #StockMarket #FinanceQuiz`);
+      const shareText = encodeURIComponent(`【バリュエーション・バトル JP】\nScore: ${score}/10\n称号: ${rank}\n\n${emojiStr}\n\n企業のEV/EBITDAを見抜けるか挑戦👇\n${window.location.href}\n#ValuationBattle #企業価値クイズ`);
       document.getElementById('shareXBtn').href = `https://twitter.com/intent/tweet?text=${shareText}`;
     }
 
-    // 初回起動
-    switchMarket('JP');
+    loadData();
   </script>
 </body>
 </html>
