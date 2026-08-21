@@ -1,0 +1,35 @@
+name: Weekly Valuation Data Update
+
+on:
+  schedule:
+    # 毎週金曜日 日本時間 19:00 (10:00 UTC) 実行
+    - cron: '0 10 * * 5'
+  workflow_dispatch: # 手動実行用
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance pandas openpyxl xlrd
+
+      - name: Run Pipeline
+        run: python valuation_pipeline.py
+
+      - name: Commit and push
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add japanese_valuation_quiz.json
+          git commit -m "Auto-update valuation data" || exit 0
+          git push
