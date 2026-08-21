@@ -2,11 +2,11 @@ import concurrent.futures
 import itertools
 import json
 import logging
-import io
-import urllib.request
+import time
 from dataclasses import asdict, dataclass
 from typing import List, Optional
-import pandas as pd
+from bs4 import BeautifulSoup
+import requests
 import yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -17,11 +17,11 @@ class CompanyProfile:
     name: str
     sector: str
     industry: str
-    market_cap: float
-    net_debt: float
-    ev: float
-    ebitda: float
-    ev_ebitda: float
+    market_cap: float      # 億円
+    net_debt: float        # 億円
+    ev: float              # 億円
+    ebitda: float          # 億円
+    ev_ebitda: float       # 倍
     description: str
 
 @dataclass
@@ -34,29 +34,53 @@ class QuizPair:
     ebitda_diff_pct: float
     multiple_ratio: float
 
-class LargeScaleValuationPipeline:
-    JPX_URL = "https://www.jpx.co.jp/markets/statistics-quotes/stocks/tvdivq0000003005-att/data_j.xls"
-
-    def __init__(self, max_companies: int = 1000, max_workers: int = 10):
-        self.max_companies = max_companies
+class YahooRankingValuationPipeline:
+    def __init__(self, target_count: int = 1000, max_workers: int = 12):
+        self.target_count = target_count
         self.max_workers = max_workers
         self.companies: List[CompanyProfile] = []
 
-    def fetch_prime_tickers(self) -> List[str]:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        req = urllib.request.Request(self.JPX_URL, headers=headers)
-        with urllib.request.urlopen(req) as response:
-            df = pd.read_excel(io.BytesIO(response.read()))
-        df.columns = [str(col).strip() for col in df.columns]
-        prime_df = df[df["市場・商品区分"].str.contains("プライム", na=False)].copy()
-        financial_sectors = ["銀行業", "証券、商品先物取引業", "保険業", "その他金融業"]
-        non_financial_df = prime_df[~prime_df["33業種区分"].isin(financial_sectors)]
-        return [str(code).strip() for code in non_financial_df["コード"] if len(str(code).strip()) == 4]
+    def fetch_top_tickers_from_yahoo(self) -> List[str]:
+        """Yahoo!ファイナンスの時価総額ランキング（プライム）から上位1,000社を取得"""
+        tickers = []
+        pages_to_fetch = (self.target_count // 50)  # 1ページ50銘柄 × 20ページ = 1,000銘柄
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+
+        logging.info(f"Yahoo!ファイナンスからプライム時価総額上位 {self.target_count} 社を動的取得中...")
+        for page in range(1, pages_to_fetch + 1):
+            url = f"https://finance.yahoo.co.jp/stocks/ranking/marketCapitalHigh?market=prime&page={page}"
+            try:
+                res = requests.get(url, headers=headers, timeout=10)
+                if res.status_code != 200:
+                    logging.warning(f"Page {page} status code: {res.status_code}")
+                    continue
+
+                soup = BeautifulSoup(res.text, "html.parser")
+                # 銘柄コードリンクの抽出 (例: /quote/7203.T)
+                links = soup.find_all("a", href=True)
+                for a in links:
+                    href = a["href"]
+                    if "/quote/" in href and ".T" in href:
+                        code = href.split("/quote/")[1].split(".T")[0].strip()
+                        if len(code) == 4 and code.isdigit() and code not in tickers:
+                            tickers.append(code)
+
+                time.sleep(0.2)  # サーバー負荷軽減
+            except Exception as e:
+                logging.warning(f"Failed to scrape page {page}: {e}")
+
+        logging.info(f"ランキングから抽出された銘柄数: {len(tickers)} 社")
+        return tickers[:self.target_count]
 
     def fetch_single_company(self, code: str) -> Optional[CompanyProfile]:
+        """個別銘柄の財務データを yfinance から取得"""
         try:
             stock = yf.Ticker(f"{code}.T")
             info = stock.info
+
+            # 金融業（銀行・保険・証券・その他金融）を除外
             sector = info.get("sector", "")
             if "Financial" in sector or "Banking" in sector:
                 return None
@@ -101,22 +125,23 @@ class LargeScaleValuationPipeline:
             return None
 
     def run_pipeline(self):
-        raw_tickers = self.fetch_prime_tickers()
+        tickers = self.fetch_top_tickers_from_yahoo()
+        logging.info(f"{len(tickers)} 社の財務データを並行取得します...")
+        
         valid = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_code = {executor.submit(self.fetch_single_company, code): code for code in raw_tickers}
+            future_to_code = {executor.submit(self.fetch_single_company, code): code for code in tickers}
             for future in concurrent.futures.as_completed(future_to_code):
                 res = future.result()
                 if res:
                     valid.append(res)
 
-        valid.sort(key=lambda x: x.market_cap, reverse=True)
-        self.companies = valid[:self.max_companies]
+        logging.info(f"有効な非金融企業: {len(valid)} 社を取得")
 
-        # 高速スライディングウィンドウ法によるペア抽出
+        # 高速スライディングウィンドウ法によるペア生成
         pairs = []
         pair_cnt = 1
-        sorted_comps = sorted(self.companies, key=lambda x: x.ebitda)
+        sorted_comps = sorted(valid, key=lambda x: x.ebitda)
         n = len(sorted_comps)
 
         for i in range(n):
@@ -124,10 +149,10 @@ class LargeScaleValuationPipeline:
             for j in range(i + 1, n):
                 b = sorted_comps[j]
                 diff_pct = (b.ebitda - a.ebitda) / b.ebitda
-                if diff_pct > 0.15:
+                if diff_pct > 0.15:  # EBITDA差 ±15%以内
                     break
                 ratio = max(a.ev_ebitda, b.ev_ebitda) / min(a.ev_ebitda, b.ev_ebitda)
-                if ratio >= 1.5:
+                if ratio >= 1.5:   # マルチプル格差 1.5倍以上
                     pairs.append(QuizPair(
                         round_id=f"ROUND_{pair_cnt:04d}",
                         category="同業対決" if a.sector == b.sector else "異業種対決",
@@ -139,8 +164,9 @@ class LargeScaleValuationPipeline:
                     ))
                     pair_cnt += 1
 
+        logging.info(f"生成されたクイズペア数: {len(pairs)} 問")
         with open("japanese_valuation_quiz.json", "w", encoding="utf-8") as f:
             json.dump([asdict(p) for p in pairs], f, ensure_ascii=False, indent=2)
 
 if __name__ == "__main__":
-    LargeScaleValuationPipeline().run_pipeline()
+    YahooRankingValuationPipeline(target_count=1000, max_workers=12).run_pipeline()
