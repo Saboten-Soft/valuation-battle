@@ -1,4 +1,5 @@
 import concurrent.futures
+import io
 import itertools
 import json
 import logging
@@ -26,17 +27,58 @@ SECTOR_MAP_JA = {
     "Real Estate": "不動産"
 }
 
+# 外部通信が全て落ちた場合でも絶対に動くS&P 500セーフティネット銘柄群（全業種・全階層）
+BACKUP_SP500_TICKERS = [
+    ("AAPL", "Apple Inc."), ("MSFT", "Microsoft Corporation"), ("NVDA", "NVIDIA Corporation"),
+    ("AMZN", "Amazon.com, Inc."), ("GOOGL", "Alphabet Inc."), ("META", "Meta Platforms, Inc."),
+    ("TSLA", "Tesla, Inc."), ("AVGO", "Broadcom Inc."), ("WMT", "Walmart Inc."),
+    ("LLY", "Eli Lilly and Company"), ("JNJ", "Johnson & Johnson"), ("PG", "Procter & Gamble"),
+    ("ORCL", "Oracle Corporation"), ("COST", "Costco Wholesale"), ("HD", "The Home Depot"),
+    ("ABBV", "AbbVie Inc."), ("NFLX", "Netflix, Inc."), ("AMD", "Advanced Micro Devices"),
+    ("CRM", "Salesforce, Inc."), ("KO", "The Coca-Cola Company"), ("PEP", "PepsiCo, Inc."),
+    ("MRK", "Merck & Co., Inc."), ("LIN", "Linde plc"), ("TMO", "Thermo Fisher Scientific"),
+    ("ADBE", "Adobe Inc."), ("CSCO", "Cisco Systems"), ("QCOM", "Qualcomm Incorporated"),
+    ("TXN", "Texas Instruments"), ("CAT", "Caterpillar Inc."), ("GE", "GE Aerospace"),
+    ("AMAT", "Applied Materials"), ("ISRG", "Intuitive Surgical"), ("DIS", "The Walt Disney Company"),
+    ("MCD", "McDonald's Corporation"), ("INTU", "Intuit Inc."), ("AMGN", "Amgen Inc."),
+    ("UNP", "Union Pacific"), ("HON", "Honeywell"), ("IBM", "IBM Corporation"),
+    ("SBUX", "Starbucks"), ("NKE", "NIKE, Inc."), ("UBER", "Uber Technologies"),
+    ("BKNG", "Booking Holdings"), ("LRCX", "Lam Research"), ("PANW", "Palo Alto Networks"),
+    ("ADI", "Analog Devices"), ("DE", "Deere & Company"), ("RTX", "RTX Corporation"),
+    ("SYK", "Stryker Corporation"), ("BA", "The Boeing Company"), ("VRTX", "Vertex Pharmaceuticals"),
+    ("MDLZ", "Mondelez International"), ("LMT", "Lockheed Martin"), ("GILD", "Gilead Sciences"),
+    ("ABT", "Abbott Laboratories"), ("DHR", "Danaher Corporation"), ("SNPS", "Synopsys"),
+    ("CDNS", "Cadence Design Systems"), ("REGN", "Regeneron Pharmaceuticals"), ("PFE", "Pfizer Inc."),
+    ("KLAC", "KLA Corporation"), ("BSX", "Boston Scientific"), ("BMY", "Bristol-Myers Squibb"),
+    ("EOG", "EOG Resources"), ("SLB", "Schlumberger"), ("MPC", "Marathon Petroleum"),
+    ("PSX", "Phillips 66"), ("VLO", "Valero Energy"), ("COP", "ConocoPhillips"),
+    ("XOM", "Exxon Mobil"), ("CVX", "Chevron Corporation"), ("OXY", "Occidental Petroleum"),
+    ("MAR", "Marriott International"), ("ABNB", "Airbnb, Inc."), ("LULU", "Lululemon Athletica"),
+    ("MNST", "Monster Beverage"), ("DECK", "Deckers Outdoor"), ("ORLY", "O'Reilly Automotive"),
+    ("AZO", "AutoZone, Inc."), ("ROST", "Ross Stores"), ("TJX", "The TJX Companies"),
+    ("TGT", "Target Corporation"), ("CMG", "Chipotle Mexican Grill"), ("YUM", "Yum! Brands"),
+    ("FDX", "FedEx Corporation"), ("UPS", "United Parcel Service"), ("NSC", "Norfolk Southern"),
+    ("CSX", "CSX Corporation"), ("WM", "Waste Management"), ("EMR", "Emerson Electric"),
+    ("ETN", "Eaton Corporation"), ("PH", "Parker-Hannifin"), ("PCAR", "PACCAR Inc"),
+    ("GD", "General Dynamics"), ("TDG", "TransDigm Group"), ("NOC", "Northrop Grumman"),
+    ("ENPH", "Enphase Energy"), ("FSLR", "First Solar"), ("ALB", "Albemarle Corporation"),
+    ("STLD", "Steel Dynamics"), ("NUE", "Nucor Corporation"), ("FCX", "Freeport-McMoRan"),
+    ("DOW", "Dow Inc."), ("ECL", "Ecolab Inc."), ("SHW", "The Sherwin-Williams Company"),
+    ("APD", "Air Products and Chemicals"), ("CTAS", "Cintas Corporation"), ("FAST", "Fastenal"),
+    ("PAYX", "Paychex, Inc."), ("VRSK", "Verisk Analytics"), ("ODFL", "Old Dominion Freight Line")
+]
+
 @dataclass
 class CompanyProfile:
     ticker: str
     name: str
     sector: str
     industry: str
-    market_cap: float      # 日本: 億円 / 米国: $B
-    net_debt: float        # 日本: 億円 / 米国: $B
-    ev: float              # 日本: 億円 / 米国: $B
-    ebitda: float          # 日本: 億円 / 米国: $B
-    ev_ebitda: float       # 倍
+    market_cap: float
+    net_debt: float
+    ev: float
+    ebitda: float
+    ev_ebitda: float
     description: str
     mcap_rank: int = 0
 
@@ -53,11 +95,11 @@ class QuizPair:
     multiple_ratio: float
 
 class UnifiedValuationPipeline:
-    def __init__(self, max_workers: int = 10):
+    def __init__(self, max_workers: int = 12):
         self.max_workers = max_workers
 
     # ---------------------------------------------------------
-    # 🇯🇵 日本市場: 東証プライム時価総額 上位1,000社
+    # 🇯🇵 日本市場 パイプライン (東証プライム 1,000社)
     # ---------------------------------------------------------
     def fetch_jp_ranking(self, target_count: int = 1000) -> List[Tuple[str, str]]:
         company_list = []
@@ -115,19 +157,47 @@ class UnifiedValuationPipeline:
         except Exception: return None
 
     # ---------------------------------------------------------
-    # 🇺🇸 米国市場: S&P 500 全500社（GitHubデータセット連携で100%成功）
+    # 🇺🇸 米国市場 パイプライン (S&P 500 500社)
     # ---------------------------------------------------------
     def fetch_sp500_tickers(self) -> List[Tuple[str, str]]:
-        logging.info("S&P 500 構成銘柄データを取得中...")
-        url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        
+        # 1. GitHub Datasets (main ブランチ)
         try:
-            df = pd.read_csv(url)
-            tickers = [(str(row["Symbol"]).replace(".", "-").strip(), str(row["Security"]).strip()) for _, row in df.iterrows()]
-            logging.info(f"S&P 500 銘柄数: {len(tickers)} 社")
-            return tickers
+            url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
+            res = requests.get(url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                df = pd.read_csv(io.StringIO(res.text))
+                tickers = [(str(row["Symbol"]).replace(".", "-").strip(), str(row["Security"]).strip()) for _, row in df.iterrows()]
+                logging.info(f"S&P 500 (GitHub CSV) 取得成功: {len(tickers)} 社")
+                return tickers
         except Exception as e:
-            logging.error(f"S&P 500 CSV取得失敗: {e}")
-            return []
+            logging.warning(f"GitHub CSV fetch error: {e}")
+
+        # 2. Wikipedia スクレイピング
+        try:
+            wiki_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+            res = requests.get(wiki_url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                table = soup.find("table", {"id": "constituents"})
+                if table:
+                    tickers = []
+                    for row in table.find_all("tr")[1:]:
+                        cols = row.find_all("td")
+                        if len(cols) > 1:
+                            t = cols[0].text.strip().replace(".", "-")
+                            n = cols[1].text.strip()
+                            tickers.append((t, n))
+                    if len(tickers) >= 400:
+                        logging.info(f"S&P 500 (Wikipedia) 取得成功: {len(tickers)} 社")
+                        return tickers
+        except Exception as e:
+            logging.warning(f"Wikipedia fetch error: {e}")
+
+        # 3. 内蔵セーフティネット
+        logging.info(f"S&P 500 (内蔵リスト) を使用: {len(BACKUP_SP500_TICKERS)} 社")
+        return BACKUP_SP500_TICKERS
 
     def fetch_us_single(self, ticker: str, name: str) -> Optional[CompanyProfile]:
         try:
@@ -147,10 +217,12 @@ class UnifiedValuationPipeline:
 
             ev_ebitda = ev / ebitda
             if ev_ebitda < 0.5 or ev_ebitda > 90.0: return None
+            
+            clean_name = name if (name and len(name) > 1) else (info.get("shortName") or ticker)
             industry = info.get("industry", "S&P 500")
 
             return CompanyProfile(
-                ticker=ticker, name=name, sector=sector, industry=industry,
+                ticker=ticker, name=clean_name, sector=sector, industry=industry,
                 market_cap=round(mcap, 2), net_debt=round(net_debt, 2), ev=round(ev, 2),
                 ebitda=round(ebitda, 2), ev_ebitda=round(ev_ebitda, 2),
                 description=f"S&P 500 / {sector} ({industry})"
@@ -158,7 +230,7 @@ class UnifiedValuationPipeline:
         except Exception: return None
 
     # ---------------------------------------------------------
-    # ペア生成アルゴリズム
+    # 対戦ペア生成
     # ---------------------------------------------------------
     def generate_pairs(self, companies: List[CompanyProfile], is_us: bool = False) -> List[QuizPair]:
         pairs = []
@@ -181,9 +253,9 @@ class UnifiedValuationPipeline:
                     top_rank = min(a.mcap_rank, b.mcap_rank)
                     
                     if is_us:
-                        if top_rank <= 50: tier = 1
-                        elif top_rank <= 150: tier = 2
-                        elif top_rank <= 300: tier = 3
+                        if top_rank <= 30: tier = 1
+                        elif top_rank <= 80: tier = 2
+                        elif top_rank <= 160: tier = 3
                         else: tier = 4
                         cat = "Same Sector" if a.sector == b.sector else "Cross Sector"
                     else:
@@ -203,8 +275,8 @@ class UnifiedValuationPipeline:
         return pairs
 
     def run(self):
-        # 1. 日本株 1,000社
-        logging.info("=== 日本市場パイプライン実行 ===")
+        # 1. 日本株
+        logging.info("=== 日本市場 パイプライン開始 ===")
         jp_ranking = self.fetch_jp_ranking(1000)
         jp_valid = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as ex:
@@ -216,10 +288,10 @@ class UnifiedValuationPipeline:
         jp_pairs = self.generate_pairs(jp_valid, is_us=False)
         with open("japanese_valuation_quiz.json", "w", encoding="utf-8") as f:
             json.dump([asdict(p) for p in jp_pairs], f, ensure_ascii=False, indent=2)
-        logging.info(f"日本版データセット生成完了: {len(jp_pairs)} 問")
+        logging.info(f"日本版クイズ生成完了: {len(jp_pairs)} 問")
 
-        # 2. 米国株 S&P 500 全500社
-        logging.info("=== 米国S&P 500パイプライン実行 ===")
+        # 2. 米国株
+        logging.info("=== 米国市場 パイプライン開始 ===")
         us_tickers = self.fetch_sp500_tickers()
         us_valid = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as ex:
@@ -236,7 +308,7 @@ class UnifiedValuationPipeline:
         us_pairs = self.generate_pairs(us_valid, is_us=True)
         with open("us_valuation_quiz.json", "w", encoding="utf-8") as f:
             json.dump([asdict(p) for p in us_pairs], f, ensure_ascii=False, indent=2)
-        logging.info(f"米国版データセット生成完了: {len(us_pairs)} 問")
+        logging.info(f"米国版クイズ生成完了: {len(us_pairs)} 問")
 
 if __name__ == "__main__":
-    UnifiedValuationPipeline(max_workers=10).run()
+    UnifiedValuationPipeline(max_workers=12).run()
