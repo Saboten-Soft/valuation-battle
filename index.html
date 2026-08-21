@@ -1,6 +1,19 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
+  <script>
+    // 初回アクセス時の言語自動判定（日本語以外は us.html へ自動転送）
+    (function() {
+      const isRedirected = sessionStorage.getItem('lang_checked');
+      if (!isRedirected) {
+        sessionStorage.setItem('lang_checked', 'true');
+        const userLang = (navigator.language || navigator.userLanguage || '').toLowerCase();
+        if (!userLang.startsWith('ja')) {
+          window.location.replace('us.html');
+        }
+      }
+    })();
+  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Valuation Battle JP - 企業価値クイズ</title>
