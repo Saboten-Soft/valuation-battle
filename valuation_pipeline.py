@@ -12,7 +12,6 @@ import yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# セクターの日本語翻訳マップ
 SECTOR_MAP_JA = {
     "Technology": "テクノロジー・半導体",
     "Consumer Cyclical": "一般消費財・自動車・小売り",
@@ -29,148 +28,135 @@ SECTOR_MAP_JA = {
 @dataclass
 class CompanyProfile:
     ticker: str
-    name: str              # 日本語企業名
-    sector: str            # 日本語セクター
+    name: str
+    sector: str
     industry: str
-    market_cap: float      # 億円
-    net_debt: float        # 億円
-    ev: float              # 億円
-    ebitda: float          # 億円
-    ev_ebitda: float       # 倍
+    market_cap: float
+    net_debt: float
+    ev: float
+    ebitda: float
+    ev_ebitda: float
     description: str
+    mcap_rank: int = 0
 
 @dataclass
 class QuizPair:
     round_id: str
     category: str
+    tier: int              # 1: Top100, 2: 101-300, 3: 301-500, 4: 501-1000
+    is_same_sector: bool
     company_a: CompanyProfile
     company_b: CompanyProfile
     winner: str
     ebitda_diff_pct: float
     multiple_ratio: float
 
-class YahooRankingValuationPipeline:
-    def __init__(self, target_count: int = 1000, max_workers: int = 12):
-        self.target_count = target_count
+class TieredValuationPipeline:
+    def __init__(self, max_workers: int = 12):
         self.max_workers = max_workers
-        self.companies: List[CompanyProfile] = []
 
-    def clean_company_name(self, raw_name: str) -> str:
-        """(株) や 株式会社 などの表記をすっきりトリミング"""
-        name = raw_name.replace("(株)", "").replace("（株）", "")
-        name = re.sub(r"^株式会社", "", name)
-        name = re.sub(r"株式会社$", "", name)
-        return name.strip()
-
-    def fetch_top_companies_from_yahoo(self) -> List[Tuple[str, str]]:
-        """Yahoo!ファイナンスから『コード』と『日本語社名』を同時に抽出"""
+    # --- 🇯🇵 JP Market Pipeline ---
+    def fetch_jp_ranking(self, target_count: int = 1000) -> List[Tuple[str, str]]:
         company_list = []
-        seen_codes = set()
-        pages_to_fetch = (self.target_count // 50)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
+        seen = set()
+        headers = {"User-Agent": "Mozilla/5.0"}
+        pages = target_count // 50
 
-        logging.info(f"Yahoo!ファイナンスから時価総額上位 {self.target_count} 社（日本語名）を取得中...")
-        for page in range(1, pages_to_fetch + 1):
+        for page in range(1, pages + 1):
             url = f"https://finance.yahoo.co.jp/stocks/ranking/marketCapitalHigh?market=prime&page={page}"
             try:
                 res = requests.get(url, headers=headers, timeout=10)
-                if res.status_code != 200:
-                    continue
-
+                if res.status_code != 200: continue
                 soup = BeautifulSoup(res.text, "html.parser")
-                links = soup.find_all("a", href=True)
-                for a in links:
+                for a in soup.find_all("a", href=True):
                     href = a["href"]
                     if "/quote/" in href and ".T" in href:
                         code = href.split("/quote/")[1].split(".T")[0].strip()
                         raw_name = a.get_text().strip()
+                        if len(code) == 4 and code.isdigit() and code not in seen and raw_name:
+                            name = re.sub(r"^株式会社|株式会社$|\(株\)|（株）", "", raw_name).strip()
+                            company_list.append((code, name))
+                            seen.add(code)
+                time.sleep(0.1)
+            except Exception: pass
+        return company_list[:target_count]
 
-                        if len(code) == 4 and code.isdigit() and code not in seen_codes and raw_name:
-                            cleaned_name = self.clean_company_name(raw_name)
-                            company_list.append((code, cleaned_name))
-                            seen_codes.add(code)
-
-                time.sleep(0.15)
-            except Exception as e:
-                logging.warning(f"Page {page} error: {e}")
-
-        logging.info(f"ランキングから抽出完了: {len(company_list)} 社")
-        return company_list[:self.target_count]
-
-    def fetch_single_company(self, code: str, ja_name: str) -> Optional[CompanyProfile]:
-        """個別銘柄の財務データを取得して日本語フォーマットへ成形"""
+    def fetch_jp_single(self, code: str, name: str, rank: int) -> Optional[CompanyProfile]:
         try:
-            stock = yf.Ticker(f"{code}.T")
-            info = stock.info
-
-            # 金融業（銀行・保険・証券）を除外
+            info = yf.Ticker(f"{code}.T").info
             sector_en = info.get("sector", "")
-            if "Financial" in sector_en or "Banking" in sector_en:
-                return None
+            if "Financial" in sector_en or "Banking" in sector_en: return None
 
-            sector_ja = SECTOR_MAP_JA.get(sector_en, "その他産業")
-            industry_en = info.get("industry", "プライム上場企業")
-
-            mcap_raw = info.get("marketCap")
-            debt_raw = info.get("totalDebt", 0) or 0
-            cash_raw = info.get("totalCash", 0) or 0
-            ebitda_raw = info.get("ebitda")
-
-            if not mcap_raw or not ebitda_raw or ebitda_raw <= 0:
-                return None
+            mcap_raw, debt_raw = info.get("marketCap"), info.get("totalDebt", 0) or 0
+            cash_raw, ebitda_raw = info.get("totalCash", 0) or 0, info.get("ebitda")
+            if not mcap_raw or not ebitda_raw or ebitda_raw <= 0: return None
 
             mcap = mcap_raw / 1e8
             net_debt = (debt_raw - cash_raw) / 1e8
             ev = mcap + net_debt
             ebitda = ebitda_raw / 1e8
-
-            if ev <= 0 or ebitda <= 0:
-                return None
+            if ev <= 0 or ebitda <= 0: return None
 
             ev_ebitda = ev / ebitda
-            if ev_ebitda < 0.5 or ev_ebitda > 80.0:
-                return None
-
-            desc_ja = f"東証プライム上場 / 【{sector_ja}】分野の主力企業。"
+            if ev_ebitda < 0.5 or ev_ebitda > 80.0: return None
+            sector_ja = SECTOR_MAP_JA.get(sector_en, "その他産業")
 
             return CompanyProfile(
-                ticker=code,
-                name=ja_name,
-                sector=sector_ja,
-                industry=industry_en,
-                market_cap=round(mcap, 1),
-                net_debt=round(net_debt, 1),
-                ev=round(ev, 1),
-                ebitda=round(ebitda, 1),
-                ev_ebitda=round(ev_ebitda, 2),
-                description=desc_ja
+                ticker=code, name=name, sector=sector_ja, industry=info.get("industry", "N/A"),
+                market_cap=round(mcap, 1), net_debt=round(net_debt, 1), ev=round(ev, 1),
+                ebitda=round(ebitda, 1), ev_ebitda=round(ev_ebitda, 2),
+                description=f"東証プライム時価総額 第{rank}位 / 【{sector_ja}】",
+                mcap_rank=rank
             )
-        except Exception:
-            return None
+        except Exception: return None
 
-    def run_pipeline(self):
-        raw_companies = self.fetch_top_companies_from_yahoo()
-        logging.info(f"{len(raw_companies)} 社の財務データを並行処理します...")
+    # --- 🇺🇸 US Market Pipeline (S&P 500) ---
+    def fetch_us_ranking(self) -> List[Tuple[str, str]]:
+        url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        soup = BeautifulSoup(res.text, "html.parser")
+        table = soup.find("table", {"id": "constituents"})
+        tickers = []
+        for row in table.find_all("tr")[1:]:
+            cols = row.find_all("td")
+            if len(cols) > 1:
+                ticker = cols[0].text.strip().replace(".", "-")
+                name = cols[1].text.strip()
+                tickers.append((ticker, name))
+        return tickers
 
-        valid = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_map = {
-                executor.submit(self.fetch_single_company, code, name): (code, name)
-                for code, name in raw_companies
-            }
-            for future in concurrent.futures.as_completed(future_map):
-                res = future.result()
-                if res:
-                    valid.append(res)
+    def fetch_us_single(self, ticker: str, name: str) -> Optional[CompanyProfile]:
+        try:
+            info = yf.Ticker(ticker).info
+            sector = info.get("sector", "")
+            if "Financial" in sector or "Banking" in sector: return None
 
-        logging.info(f"有効企業数: {len(valid)} 社（日本語データ化完了）")
+            mcap_raw, debt_raw = info.get("marketCap"), info.get("totalDebt", 0) or 0
+            cash_raw, ebitda_raw = info.get("totalCash", 0) or 0, info.get("ebitda")
+            if not mcap_raw or not ebitda_raw or ebitda_raw <= 0: return None
 
-        # 高速スライディングウィンドウ法による対戦ペア生成
+            mcap = mcap_raw / 1e9
+            net_debt = (debt_raw - cash_raw) / 1e9
+            ev = mcap + net_debt
+            ebitda = ebitda_raw / 1e9
+            if ev <= 0 or ebitda <= 0: return None
+
+            ev_ebitda = ev / ebitda
+            if ev_ebitda < 0.5 or ev_ebitda > 90.0: return None
+            desc = (info.get("longBusinessSummary") or "")[:80] + "..."
+
+            return CompanyProfile(
+                ticker=ticker, name=name, sector=sector, industry=info.get("industry", "N/A"),
+                market_cap=round(mcap, 2), net_debt=round(net_debt, 2), ev=round(ev, 2),
+                ebitda=round(ebitda, 2), ev_ebitda=round(ev_ebitda, 2), description=desc
+            )
+        except Exception: return None
+
+    # --- Tier Calculation & Pair Generation ---
+    def generate_tiered_pairs(self, companies: List[CompanyProfile], is_us: bool = False) -> List[QuizPair]:
         pairs = []
         pair_cnt = 1
-        sorted_comps = sorted(valid, key=lambda x: x.ebitda)
+        sorted_comps = sorted(companies, key=lambda x: x.ebitda)
         n = len(sorted_comps)
 
         for i in range(n):
@@ -178,14 +164,30 @@ class YahooRankingValuationPipeline:
             for j in range(i + 1, n):
                 b = sorted_comps[j]
                 diff_pct = (b.ebitda - a.ebitda) / b.ebitda
-                if diff_pct > 0.15:  # EBITDA差 ±15%以内
-                    break
+                if diff_pct > 0.15: break
                 ratio = max(a.ev_ebitda, b.ev_ebitda) / min(a.ev_ebitda, b.ev_ebitda)
-                if ratio >= 1.5:   # マルチプル差 1.5倍以上
-                    category = "同業対決" if a.sector == b.sector else "異業種対決"
+                if ratio >= 1.4:
+                    top_rank = min(a.mcap_rank, b.mcap_rank)
+                    
+                    # ティア判定 (日本: 1000社基準 / 米国: 500社基準)
+                    if is_us:
+                        if top_rank <= 50: tier = 1
+                        elif top_rank <= 150: tier = 2
+                        elif top_rank <= 300: tier = 3
+                        else: tier = 4
+                        cat = "Same Sector" if a.sector == b.sector else "Cross Sector"
+                    else:
+                        if top_rank <= 100: tier = 1
+                        elif top_rank <= 300: tier = 2
+                        elif top_rank <= 500: tier = 3
+                        else: tier = 4
+                        cat = "同業対決" if a.sector == b.sector else "異業種対決"
+
                     pairs.append(QuizPair(
                         round_id=f"ROUND_{pair_cnt:04d}",
-                        category=category,
+                        category=cat,
+                        tier=tier,
+                        is_same_sector=(a.sector == b.sector),
                         company_a=a,
                         company_b=b,
                         winner="A" if a.ev > b.ev else "B",
@@ -193,10 +195,43 @@ class YahooRankingValuationPipeline:
                         multiple_ratio=round(ratio, 2)
                     ))
                     pair_cnt += 1
+        return pairs
 
-        logging.info(f"生成された日本語クイズペア: {len(pairs)} 問")
+    def run(self):
+        # 1. 日本市場
+        logging.info("=== 日本市場データの処理開始 ===")
+        jp_ranking = self.fetch_jp_ranking(1000)
+        jp_valid = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as ex:
+            fmap = {ex.submit(self.fetch_jp_single, c, n, idx + 1): (c, n) for idx, (c, n) in enumerate(jp_ranking)}
+            for f in concurrent.futures.as_completed(fmap):
+                r = f.result()
+                if r: jp_valid.append(r)
+        
+        jp_pairs = self.generate_tiered_pairs(jp_valid, is_us=False)
         with open("japanese_valuation_quiz.json", "w", encoding="utf-8") as f:
-            json.dump([asdict(p) for p in pairs], f, ensure_ascii=False, indent=2)
+            json.dump([asdict(p) for p in jp_pairs], f, ensure_ascii=False, indent=2)
+        logging.info(f"日本版: {len(jp_pairs)} 問生成完了")
+
+        # 2. 米国市場
+        logging.info("=== 米国市場データの処理開始 ===")
+        us_tickers = self.fetch_us_ranking()
+        us_valid = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as ex:
+            fmap = {ex.submit(self.fetch_us_single, t, n): (t, n) for t, n in us_tickers}
+            for f in concurrent.futures.as_completed(fmap):
+                r = f.result()
+                if r: us_valid.append(r)
+
+        # 米国版は時価総額順にソートして順位を割り振る
+        us_valid.sort(key=lambda x: x.market_cap, reverse=True)
+        for idx, comp in enumerate(us_valid):
+            comp.mcap_rank = idx + 1
+
+        us_pairs = self.generate_tiered_pairs(us_valid, is_us=True)
+        with open("us_valuation_quiz.json", "w", encoding="utf-8") as f:
+            json.dump([asdict(p) for p in us_pairs], f, ensure_ascii=False, indent=2)
+        logging.info(f"米国版: {len(us_pairs)} 問生成完了")
 
 if __name__ == "__main__":
-    YahooRankingValuationPipeline(target_count=1000, max_workers=12).run_pipeline()
+    TieredValuationPipeline().run()
