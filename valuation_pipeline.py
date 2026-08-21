@@ -1,15 +1,18 @@
 import concurrent.futures
-import itertools
 import json
 import logging
 import re
 import time
+import random
 from dataclasses import asdict, dataclass
 from typing import List, Optional, Tuple
+
 from bs4 import BeautifulSoup
 import pandas as pd
 import requests
 import yfinance as yf
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -32,11 +35,11 @@ class CompanyProfile:
     name: str
     sector: str
     industry: str
-    market_cap: float      
-    net_debt: float        
-    ev: float              
-    ebitda: float          
-    ev_ebitda: float       
+    market_cap: float
+    net_debt: float
+    ev: float
+    ebitda: float
+    ev_ebitda: float
     description: str
     mcap_rank: int = 0
 
@@ -53,20 +56,25 @@ class QuizPair:
     multiple_ratio: float
 
 class UnifiedValuationPipeline:
-    def __init__(self, max_workers: int = 10):
+    def __init__(self, max_workers: int = 3): # ★制限回避のため並行数を3に低下
         self.max_workers = max_workers
+        
+        # ★429(Rate Limit)エラー時に自動で待機・再挑戦する強靭なセッションを作成
+        self.session = requests.Session()
+        retries = Retry(total=5, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+        self.session.mount("https://", HTTPAdapter(max_retries=retries))
+        self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
 
+    # --- 🇯🇵 日本株 ---
     def fetch_jp_ranking(self, target_count: int = 1000) -> List[Tuple[str, str]]:
         company_list = []
         seen = set()
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         pages = target_count // 50
-
         logging.info(f"Yahoo!ファイナンスから日本株上位 {target_count} 社を取得中...")
         for page in range(1, pages + 1):
             url = f"https://finance.yahoo.co.jp/stocks/ranking/marketCapitalHigh?market=prime&page={page}"
             try:
-                res = requests.get(url, headers=headers, timeout=10)
+                res = self.session.get(url, timeout=10)
                 if res.status_code != 200: continue
                 soup = BeautifulSoup(res.text, "html.parser")
                 for a in soup.find_all("a", href=True):
@@ -78,18 +86,22 @@ class UnifiedValuationPipeline:
                             name = re.sub(r"^株式会社|株式会社$|\(株\)|（株）", "", raw_name).strip()
                             company_list.append((code, name))
                             seen.add(code)
-                time.sleep(0.05)
+                time.sleep(1) # 一覧取得時も少し休む
             except Exception: pass
         return company_list[:target_count]
 
     def fetch_jp_single(self, code: str, name: str, rank: int) -> Optional[CompanyProfile]:
         try:
-            info = yf.Ticker(f"{code}.T").info
+            time.sleep(random.uniform(0.5, 1.2)) # ★毎回0.5〜1.2秒ランダムに休む（人間らしさ）
+            info = yf.Ticker(f"{code}.T", session=self.session).info
             sector_en = info.get("sector", "")
             if "Financial" in sector_en or "Banking" in sector_en: return None
 
-            mcap_raw, debt_raw = info.get("marketCap"), info.get("totalDebt", 0) or 0
-            cash_raw, ebitda_raw = info.get("totalCash", 0) or 0, info.get("ebitda")
+            mcap_raw = info.get("marketCap")
+            debt_raw = info.get("totalDebt", 0) or 0
+            cash_raw = info.get("totalCash", 0) or 0
+            ebitda_raw = info.get("ebitda")
+
             if not mcap_raw or not ebitda_raw or ebitda_raw <= 0: return None
 
             mcap = mcap_raw / 1e8
@@ -111,9 +123,7 @@ class UnifiedValuationPipeline:
             )
         except Exception: return None
 
-    # ---------------------------------------------------------
-    # 🇺🇸 修正箇所: URLを "master" から "main" に変更
-    # ---------------------------------------------------------
+    # --- 🇺🇸 米国株 ---
     def fetch_sp500_tickers(self) -> List[Tuple[str, str]]:
         logging.info("S&P 500 構成銘柄データを取得中...")
         url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
@@ -128,12 +138,16 @@ class UnifiedValuationPipeline:
 
     def fetch_us_single(self, ticker: str, name: str) -> Optional[CompanyProfile]:
         try:
-            info = yf.Ticker(ticker).info
+            time.sleep(random.uniform(0.5, 1.2)) # ★毎回0.5〜1.2秒ランダムに休む
+            info = yf.Ticker(ticker, session=self.session).info
             sector = info.get("sector", "")
             if "Financial" in sector or "Banking" in sector: return None
 
-            mcap_raw, debt_raw = info.get("marketCap"), info.get("totalDebt", 0) or 0
-            cash_raw, ebitda_raw = info.get("totalCash", 0) or 0, info.get("ebitda")
+            mcap_raw = info.get("marketCap")
+            debt_raw = info.get("totalDebt", 0) or 0
+            cash_raw = info.get("totalCash", 0) or 0
+            ebitda_raw = info.get("ebitda")
+            
             if not mcap_raw or not ebitda_raw or ebitda_raw <= 0: return None
 
             mcap = mcap_raw / 1e9
@@ -154,6 +168,7 @@ class UnifiedValuationPipeline:
             )
         except Exception: return None
 
+    # --- ペア生成 ---
     def generate_pairs(self, companies: List[CompanyProfile], is_us: bool = False) -> List[QuizPair]:
         pairs = []
         pair_cnt = 1
@@ -207,9 +222,13 @@ class UnifiedValuationPipeline:
                 if r: jp_valid.append(r)
         
         jp_pairs = self.generate_pairs(jp_valid, is_us=False)
-        with open("japanese_valuation_quiz.json", "w", encoding="utf-8") as f:
-            json.dump([asdict(p) for p in jp_pairs], f, ensure_ascii=False, indent=2)
-        logging.info(f"日本版データセット生成完了: {len(jp_pairs)} 問")
+        # ★取得失敗時はファイル上書きを防ぐ（フェイルセーフ）
+        if jp_pairs:
+            with open("japanese_valuation_quiz.json", "w", encoding="utf-8") as f:
+                json.dump([asdict(p) for p in jp_pairs], f, ensure_ascii=False, indent=2)
+            logging.info(f"日本版データセット生成完了: {len(jp_pairs)} 問")
+        else:
+            logging.error("日本版のデータ生成に失敗しました。")
 
         logging.info("=== 米国S&P 500パイプライン実行 ===")
         us_tickers = self.fetch_sp500_tickers()
@@ -226,9 +245,13 @@ class UnifiedValuationPipeline:
             comp.description = f"S&P 500 Rank #{comp.mcap_rank} / {comp.sector}"
 
         us_pairs = self.generate_pairs(us_valid, is_us=True)
-        with open("us_valuation_quiz.json", "w", encoding="utf-8") as f:
-            json.dump([asdict(p) for p in us_pairs], f, ensure_ascii=False, indent=2)
-        logging.info(f"米国版データセット生成完了: {len(us_pairs)} 問")
+        # ★取得失敗時はファイル上書きを防ぐ（フェイルセーフ）
+        if us_pairs:
+            with open("us_valuation_quiz.json", "w", encoding="utf-8") as f:
+                json.dump([asdict(p) for p in us_pairs], f, ensure_ascii=False, indent=2)
+            logging.info(f"米国版データセット生成完了: {len(us_pairs)} 問")
+        else:
+            logging.error("米国版のデータ生成に失敗しました。")
 
 if __name__ == "__main__":
-    UnifiedValuationPipeline(max_workers=10).run()
+    UnifiedValuationPipeline(max_workers=3).run()
