@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Valuation Battle US - S&P 500 Quiz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #080c14;
+      --bg-card: rgba(18, 26, 44, 0.92);
+      --border-color: rgba(255, 255, 255, 0.1);
+      --primary: #3b82f6;
+      --accent-win: #10b981;
+      --accent-lose: #ef4444;
+      --accent-gold: #f59e0b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      height: 100%; height: 100dvh; width: 100vw; overflow: hidden;
+      background-color: var(--bg-dark);
+      background-image: radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.9) 0%, transparent 100%);
+      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+      color: var(--text-main);
+    }
+    body { display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 6px 8px; }
+    .app-wrapper { width: 100%; max-width: 800px; height: 100%; display: flex; flex-direction: column; justify-content: space-between; gap: 4px; }
+    header { display: flex; align-items: center; justify-content: space-between; background: var(--bg-card); border: 1px solid var(--border-color); padding: 5px 10px; border-radius: 10px; flex-shrink: 0; }
+    .brand-title { font-size: 0.9rem; font-weight: 900; background: linear-gradient(135deg, #ffffff 40%, #93c5fd 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .market-switch { display: flex; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 2px; border: 1px solid rgba(255,255,255,0.1); }
+    .switch-btn { padding: 3px 8px; font-size: 0.7rem; font-weight: 800; border: none; background: transparent; color: var(--text-muted); text-decoration: none; border-radius: 4px; }
+    .switch-btn.active { background: var(--primary); color: #fff; }
+    .stat-box { display: flex; gap: 8px; font-size: 0.75rem; color: var(--text-muted); font-weight: 700; }
+    .stat-box strong { color: #fff; font-size: 0.85rem; font-family: 'Plus Jakarta Sans', sans-serif; }
+    .question-ribbon { display: flex; justify-content: space-between; align-items: center; background: linear-gradient(90deg, rgba(30, 58, 138, 0.4), rgba(88, 28, 135, 0.4)); border: 1px solid rgba(96, 165, 250, 0.25); padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 700; flex-shrink: 0; }
+    .tier-badge { font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; font-weight: 800; }
+    .tier-1 { background: rgba(59, 130, 246, 0.3); color: #93c5fd; border: 1px solid #3b82f6; }
+    .tier-2 { background: rgba(16, 185, 129, 0.3); color: #6ee7b7; border: 1px solid #10b981; }
+    .tier-3 { background: rgba(245, 158, 11, 0.3); color: #fcd34d; border: 1px solid #f59e0b; }
+    .tier-4 { background: rgba(239, 68, 68, 0.3); color: #fca5a5; border: 1px solid #ef4444; }
+    .bracket-pill { background: var(--accent-gold); color: #0f172a; padding: 1px 6px; border-radius: 4px; font-weight: 900; }
+    .battle-container { display: grid; grid-template-columns: 1fr 20px 1fr; gap: 6px; align-items: stretch; flex: 1; min-height: 0; }
+    .vs-sign { display: flex; justify-content: center; align-items: center; font-weight: 900; font-size: 0.95rem; color: rgba(255, 255, 255, 0.2); }
+    .card { background: var(--bg-card); border: 1.5px solid var(--border-color); border-radius: 10px; padding: 8px 10px; cursor: pointer; transition: all 0.2s ease; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; }
+    .card.disabled { cursor: default; }
+    .card.winner-card { border-color: var(--accent-win) !important; background: rgba(16, 185, 129, 0.12) !important; }
+    .card.loser-card { border-color: rgba(255, 255, 255, 0.08) !important; opacity: 0.5; }
+    .card.user-selected-wrong { border-color: var(--accent-lose) !important; }
+    .winner-stamp { position: absolute; top: 6px; right: 6px; background: var(--accent-win); color: #064e3b; font-weight: 900; font-size: 0.6rem; padding: 2px 5px; border-radius: 999px; display: none; }
+    .ticker-code { font-size: 0.65rem; font-weight: 700; color: #60a5fa; }
+    .company-title { font-size: 0.95rem; font-weight: 900; line-height: 1.15; margin: 1px 0; color: #fff; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .industry-badge { display: inline-block; font-size: 0.6rem; padding: 1px 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); color: #cbd5e1; }
+    .company-summary { font-size: 0.65rem; color: #94a3b8; line-height: 1.25; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .ebitda-chip { background: rgba(0, 0, 0, 0.35); border-radius: 6px; padding: 4px 6px; display: flex; justify-content: space-between; align-items: center; margin-top: 3px; }
+    .chip-label { font-size: 0.6rem; color: var(--text-muted); font-weight: 600; }
+    .chip-val { font-size: 0.78rem; font-weight: 800; color: var(--accent-gold); }
+    .valuation-box { display: none; background: rgba(0, 0, 0, 0.5); border-radius: 6px; padding: 4px 6px; border: 1px solid rgba(255, 255, 255, 0.1); margin-top: 3px; }
+    .metrics-table { width: 100%; border-collapse: collapse; }
+    .metrics-table tr td { padding: 1px 0; font-size: 0.62rem; }
+    .metrics-table td:last-child { text-align: right; font-weight: 700; }
+    .highlight-ev { color: #38bdf8; font-weight: 900 !important; }
+    .highlight-mult { color: #34d399; font-weight: 900 !important; }
+    .bottom-panel { height: 72px; flex-shrink: 0; display: flex; }
+    .placeholder-hint { width: 100%; height: 100%; background: rgba(23, 32, 54, 0.4); border: 1px dashed rgba(255, 255, 255, 0.15); border-radius: 8px; display: flex; align-items: center; justify-content: center; text-align: center; color: #64748b; font-size: 0.7rem; font-weight: 600; padding: 0 8px; }
+    .result-card { display: none; width: 100%; height: 100%; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 4px 10px; align-items: center; justify-content: space-between; gap: 6px; }
+    .result-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+    .result-header { font-size: 0.75rem; font-weight: 900; }
+    .result-header.correct { color: var(--accent-win); }
+    .result-header.wrong { color: var(--accent-lose); }
+    .result-desc { font-size: 0.62rem; color: #cbd5e1; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .btn-next { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 0.75rem; font-weight: 800; cursor: pointer; flex-shrink: 0; }
+    .ad-banner-slot { width: 100%; height: 48px; background: rgba(0,0,0,0.2); border-radius: 6px; display: flex; align-items: center; justify-content: center; border: 1px dashed rgba(255,255,255,0.06); flex-shrink: 0; }
+    .summary-card { display: none; background: var(--bg-card); border: 1.5px solid rgba(59, 130, 246, 0.4); border-radius: 14px; padding: 16px; text-align: center; max-width: 440px; margin: auto; }
+    .final-score { font-size: 2.2rem; font-weight: 900; color: #60a5fa; margin: 4px 0; }
+    .rank-badge { display: inline-block; background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; color: #93c5fd; padding: 2px 10px; border-radius: 20px; font-weight: 800; font-size: 0.8rem; margin-bottom: 8px; }
+    .btn-share-x { background: #000; border: 1px solid #333; color: #fff; padding: 8px 18px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; margin-top: 8px; }
+    .btn-restart { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 0.8rem; font-weight: 800; cursor: pointer; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="app-wrapper">
+    <header>
+      <span class="brand-title">Valuation Battle US</span>
+      <div class="market-switch">
+        <a href="index.html" class="switch-btn">🇯🇵 JP</a>
+        <span class="switch-btn active">🇺🇸 US</span>
+      </div>
+      <div class="stat-box">
+        <span>Q: <strong id="roundDisplay">1/10</strong></span>
+        <span>W: <strong id="scoreDisplay">0</strong></span>
+        <span>Streak: <strong id="streakDisplay">0🔥</strong></span>
+      </div>
+    </header>
+
+    <div id="gamePlayArea" style="display: flex; flex-direction: column; flex: 1; gap: 4px; min-height: 0;">
+      <div class="question-ribbon">
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <span id="tierBadge" class="tier-badge tier-1">Tier 1: Mega-Cap</span>
+          <span id="categoryName" style="color: #cbd5e1;">Same Sector</span>
+        </div>
+        <span class="bracket-pill" id="ebitdaBracket">EBITDA: ~</span>
+      </div>
+
+      <div class="battle-container">
+        <div class="card" id="cardA" onclick="handleChoice('A')">
+          <div class="winner-stamp" id="stampA">HIGHER EV 👑</div>
+          <div>
+            <span class="ticker-code" id="tickerA">----</span>
+            <h2 class="company-title" id="nameA">Loading...</h2>
+            <span class="industry-badge" id="sectorA">-</span>
+            <p class="company-summary" id="descA">-</p>
+          </div>
+          <div>
+            <div class="ebitda-chip"><span class="chip-label">EBITDA</span><span class="chip-val" id="ebitdaValA">-</span></div>
+            <div class="valuation-box" id="revealA">
+              <table class="metrics-table">
+                <tr><td style="color: var(--text-muted);">Market Cap</td><td id="mcapA">-</td></tr>
+                <tr><td style="color: var(--text-muted);">Net Debt</td><td id="debtA">-</td></tr>
+                <tr><td style="color: #93c5fd;">Enterprise Value</td><td class="highlight-ev" id="evA">-</td></tr>
+                <tr><td style="color: #6ee7b7;">EV / EBITDA</td><td class="highlight-mult" id="multA">-</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="vs-sign">VS</div>
+
+        <div class="card" id="cardB" onclick="handleChoice('B')">
+          <div class="winner-stamp" id="stampB">HIGHER EV 👑</div>
+          <div>
+            <span class="ticker-code" id="tickerB">----</span>
+            <h2 class="company-title" id="nameB">Loading...</h2>
+            <span class="industry-badge" id="sectorB">-</span>
+            <p class="company-summary" id="descB">-</p>
+          </div>
+          <div>
+            <div class="ebitda-chip"><span class="chip-label">EBITDA</span><span class="chip-val" id="ebitdaValB">-</span></div>
+            <div class="valuation-box" id="revealB">
+              <table class="metrics-table">
+                <tr><td style="color: var(--text-muted);">Market Cap</td><td id="mcapB">-</td></tr>
+                <tr><td style="color: var(--text-muted);">Net Debt</td><td id="debtB">-</td></tr>
+                <tr><td style="color: #93c5fd;">Enterprise Value</td><td class="highlight-ev" id="evB">-</td></tr>
+                <tr><td style="color: #6ee7b7;">EV / EBITDA</td><td class="highlight-mult" id="multB">-</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bottom-panel">
+        <div class="placeholder-hint" id="placeholderHint">👆 Which company has the higher EV/EBITDA multiple?</div>
+        <div class="result-card" id="resultCard">
+          <div class="result-info">
+            <div class="result-header" id="resultStatus">🎉 Correct!</div>
+            <div class="result-desc" id="explanationText"></div>
+          </div>
+          <button class="btn-next" onclick="nextRound()">Next ➔</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="summary-card" id="summaryCard">
+      <h3>🎉 Session Complete!</h3>
+      <div class="final-score" id="finalScoreDisplay">0 / 10</div>
+      <div class="rank-badge" id="rankBadge">Title: Analyst</div>
+      <div id="emojiGrid" style="font-size: 1.2rem; letter-spacing: 2px; margin: 4px 0;"></div>
+      <div style="display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;">
+        <a id="shareXBtn" class="btn-share-x" target="_blank">𝕏 Share Result</a>
+        <button class="btn-restart" onclick="initGameSession()">Play Again 🔄</button>
+      </div>
+    </div>
+
+    <div class="ad-banner-slot" id="adSlot">
+      <span style="font-size: 0.65rem; color: #475569;">[Ad Slot: Financial Careers / Wealth Management]</span>
+    </div>
+  </div>
+
+  <script>
+    let fullPool = [], sessionData = [], currentIndex = 0, score = 0, streak = 0, hasAnswered = false, historyResults = [];
+
+    function formatVal(val) {
+      if (!val && val !== 0) return "-";
+      return `$${val.toFixed(1)}B`;
+    }
+
+    function sampleBalancedQuestions(pool) {
+      const shuffle = arr => [...arr].sort(() => 0.5 - Math.random());
+      const t1 = pool.filter(p => p.tier === 1), t2 = pool.filter(p => p.tier === 2);
+      const t3 = pool.filter(p => p.tier === 3), t4 = pool.filter(p => p.tier === 4);
+
+      const pick = (arr, count) => {
+        if (!arr || arr.length === 0) return [];
+        if (arr.length <= count) return shuffle(arr);
+        const same = shuffle(arr.filter(p => p.is_same_sector));
+        const cross = shuffle(arr.filter(p => !p.is_same_sector));
+        const res = [];
+        if (same.length > 0) res.push(same.pop());
+        while (res.length < count && (cross.length > 0 || same.length > 0)) {
+          if (cross.length > 0) res.push(cross.pop());
+          else if (same.length > 0) res.push(same.pop());
+        }
+        return shuffle(res);
+      };
+
+      let selected = [...pick(t1, 3), ...pick(t2, 3), ...pick(t3, 2), ...pick(t4, 2)];
+      if (selected.length < 10) {
+        const remaining = shuffle(pool.filter(p => !selected.includes(p)));
+        selected = [...selected, ...remaining.slice(0, 10 - selected.length)];
+      }
+      return selected.slice(0, 10);
+    }
+
+    async function loadData() {
+      try {
+        const res = await fetch(`us_valuation_quiz.json?v=${Date.now()}`);
+        fullPool = await res.json();
+        initGameSession();
+      } catch (e) {
+        alert("Failed to load US market data.");
+      }
+    }
+
+    function initGameSession() {
+      if (!fullPool || fullPool.length === 0) return;
+      sessionData = sampleBalancedQuestions(fullPool);
+      currentIndex = 0; score = 0; streak = 0; historyResults = [];
+      document.getElementById('summaryCard').style.display = 'none';
+      document.getElementById('gamePlayArea').style.display = 'flex';
+      renderRound();
+    }
+
+    function renderRound() {
+      const q = sessionData[currentIndex];
+      hasAnswered = false;
+      document.getElementById('roundDisplay').textContent = `${currentIndex + 1}/${sessionData.length}`;
+      document.getElementById('scoreDisplay').textContent = score;
+      document.getElementById('streakDisplay').textContent = `${streak}🔥`;
+      document.getElementById('categoryName').textContent = q.category || 'Market Battle';
+      document.getElementById('ebitdaBracket').textContent = `EBITDA: ~${formatVal(q.company_a.ebitda)}`;
+
+      const tBadge = document.getElementById('tierBadge');
+      const tierNum = q.tier || 1;
+      tBadge.className = `tier-badge tier-${tierNum}`;
+      tBadge.textContent = tierNum === 1 ? 'Tier 1: Mega-Cap' : tierNum === 2 ? 'Tier 2: Core Large' : tierNum === 3 ? 'Tier 3: Mid-Cap' : 'Tier 4: Niche / Boss';
+
+      ['A', 'B'].forEach(side => {
+        const comp = side === 'A' ? q.company_a : q.company_b;
+        const card = document.getElementById('card' + side);
+        card.className = "card";
+        document.getElementById('stamp' + side).style.display = 'none';
+        document.getElementById('reveal' + side).style.display = 'none';
+        document.getElementById('ticker' + side).textContent = comp.ticker;
+        document.getElementById('name' + side).textContent = comp.name;
+        document.getElementById('sector' + side).textContent = comp.sector || comp.industry;
+        document.getElementById('desc' + side).textContent = comp.description;
+        document.getElementById('ebitdaVal' + side).textContent = formatVal(comp.ebitda);
+        document.getElementById('mcap' + side).textContent = formatVal(comp.market_cap);
+        document.getElementById('debt' + side).textContent = (comp.net_debt < 0 ? "-" : "+") + formatVal(Math.abs(comp.net_debt));
+        document.getElementById('ev' + side).textContent = formatVal(comp.ev);
+        document.getElementById('mult' + side).textContent = (comp.ev_ebitda).toFixed(1) + " x";
+      });
+
+      document.getElementById('placeholderHint').style.display = 'flex';
+      document.getElementById('resultCard').style.display = 'none';
+    }
+
+    function handleChoice(selected) {
+      if (hasAnswered) return;
+      hasAnswered = true;
+      const q = sessionData[currentIndex];
+      const trueWinner = q.company_a.ev >= q.company_b.ev ? "A" : "B";
+      const isCorrect = selected === trueWinner;
+      historyResults.push(isCorrect ? "🟩" : "🟥");
+
+      document.getElementById('cardA').classList.add('disabled');
+      document.getElementById('cardB').classList.add('disabled');
+      document.getElementById('revealA').style.display = 'block';
+      document.getElementById('revealB').style.display = 'block';
+
+      if (trueWinner === 'A') {
+        document.getElementById('cardA').classList.add('winner-card');
+        document.getElementById('cardB').classList.add('loser-card');
+        document.getElementById('stampA').style.display = 'block';
+      } else {
+        document.getElementById('cardB').classList.add('winner-card');
+        document.getElementById('cardA').classList.add('loser-card');
+        document.getElementById('stampB').style.display = 'block';
+      }
+
+      const resStatus = document.getElementById('resultStatus');
+      if (isCorrect) {
+        score++; streak++;
+        resStatus.className = 'result-header correct'; resStatus.textContent = '🎉 Correct!';
+      } else {
+        streak = 0;
+        resStatus.className = 'result-header wrong'; resStatus.textContent = '😢 Incorrect!';
+        document.getElementById('card' + selected).classList.add('user-selected-wrong');
+      }
+
+      document.getElementById('scoreDisplay').textContent = score;
+      document.getElementById('streakDisplay').textContent = `${streak}🔥`;
+      const winComp = trueWinner === 'A' ? q.company_a : q.company_b;
+      const loseComp = trueWinner === 'A' ? q.company_b : q.company_a;
+      document.getElementById('explanationText').innerHTML = `<strong>${winComp.name}</strong> (${winComp.ev_ebitda.toFixed(1)}x) trades at a higher multiple than ${loseComp.name} (${loseComp.ev_ebitda.toFixed(1)}x).`;
+      document.getElementById('placeholderHint').style.display = 'none';
+      document.getElementById('resultCard').style.display = 'flex';
+    }
+
+    function nextRound() {
+      if (currentIndex < sessionData.length - 1) { currentIndex++; renderRound(); }
+      else { showSummary(); }
+    }
+
+    function showSummary() {
+      document.getElementById('gamePlayArea').style.display = 'none';
+      document.getElementById('summaryCard').style.display = 'block';
+      document.getElementById('finalScoreDisplay').textContent = `${score} / ${sessionData.length}`;
+      let rank = "Summer Intern ☕";
+      if (score === 10) rank = "Legendary Portfolio Manager 👑";
+      else if (score >= 8) rank = "Private Equity Partner 🎖️";
+      else if (score >= 6) rank = "Senior Associate 💼";
+      else if (score >= 4) rank = "Junior Analyst 📊";
+      document.getElementById('rankBadge').textContent = `Title: ${rank}`;
+      const emojiStr = historyResults.join('');
+      document.getElementById('emojiGrid').textContent = emojiStr;
+
+      const shareText = encodeURIComponent(`【Valuation Battle US (S&P 500)】\nScore: ${score}/10\nTitle: ${rank}\n\n${emojiStr}\n\nCan you spot the higher valuation multiple?👇\n${window.location.href}\n#ValuationBattle #StockMarket #FinanceQuiz`);
+      document.getElementById('shareXBtn').href = `https://twitter.com/intent/tweet?text=${shareText}`;
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
